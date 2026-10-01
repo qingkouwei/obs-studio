@@ -28,7 +28,9 @@ export struct SceneList {
           .height(24)
           .enabled(this.model.coreReady)
           .onClick(() => {
-            ObsController.createScene(`Scene ${this.model.sceneNameCounter}`);
+            ObsController.createScene(
+              this.getUIContext().getHostContext()!.resourceManager.getStringSync(
+                $r('app.string.scene_named').id, `${this.model.sceneNameCounter + 1}`));
           })
         Button('-')
           .type(ButtonType.Normal)
