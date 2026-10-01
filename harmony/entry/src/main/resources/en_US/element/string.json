@@ -215,6 +215,34 @@
     {
       "name": "st_capture_failed",
       "value": "capture failed"
+    },
+    {
+      "name": "filters",
+      "value": "Filters"
+    },
+    {
+      "name": "notice_add_filter_fail",
+      "value": "Could not add filter '{0}'."
+    },
+    {
+      "name": "filter_color",
+      "value": "Color Correction"
+    },
+    {
+      "name": "filter_flip",
+      "value": "Flip"
+    },
+    {
+      "name": "filter_scale",
+      "value": "Scale Filtering"
+    },
+    {
+      "name": "filter_crop",
+      "value": "Crop"
+    },
+    {
+      "name": "filter_sharpness",
+      "value": "Sharpen"
     }
   ]
 }

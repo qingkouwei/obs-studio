@@ -63,8 +63,7 @@ export struct SceneList {
             .backgroundColor(scene.id === this.model.selectedSceneId ?
             $r('app.color.obs_accent') : Color.Transparent)
             .onClick(() => {
-              this.model.selectedSceneId = scene.id;
-              ObsController.refreshSources();
+              ObsController.selectScene(scene.id);
             })
           }
         }, (scene: SceneItemModel) => scene.id)

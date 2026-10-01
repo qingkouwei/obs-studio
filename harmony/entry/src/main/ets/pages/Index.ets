@@ -6,6 +6,7 @@ import { RawFileExtractor } from '../common/RawFileExtractor';
 import { PreviewCanvas } from '../components/PreviewCanvas';
 import { SceneList } from '../components/SceneList';
 import { SourceList } from '../components/SourceList';
+import { FilterPanel } from '../components/FilterPanel';
 import { AudioMixer } from '../components/AudioMixer';
 import { TransportBar } from '../components/TransportBar';
 
@@ -144,6 +145,7 @@ struct Index {
 
       Column() {
         SourceList({ model: this.model })
+        FilterPanel({ model: this.model })
       }
       .layoutWeight(1)
       .width('100%')
@@ -152,7 +154,7 @@ struct Index {
       .borderRadius(6)
     }
     .width(this.isLargeScreen ? 320 : '100%')
-    .height(this.isLargeScreen ? '100%' : 300)
+    .height(this.isLargeScreen ? '100%' : 400)
   }
 
   @Builder
