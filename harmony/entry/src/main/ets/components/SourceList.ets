@@ -13,17 +13,17 @@ import { ObsAppState, ObsController, SourceItemModel } from '../model/ObsModel';
  * the button is tapped on a device.
  */
 interface SourceTypeEntry {
-  label: string;
+  label: Resource;
   id: string;
 }
 
 const SOURCE_TYPES: SourceTypeEntry[] = [
-  { label: 'Display', id: 'harmony_display_capture' },
-  { label: 'Window', id: 'harmony_window_capture' },
-  { label: 'Camera', id: 'harmony_camera_capture' },
-  { label: 'Mic', id: 'harmony_mic_capture' },
-  { label: 'Desktop', id: 'harmony_desktop_audio' },
-  { label: 'Image', id: 'image_source' },
+  { label: $r('app.string.src_display'), id: 'harmony_display_capture' },
+  { label: $r('app.string.src_window'), id: 'harmony_window_capture' },
+  { label: $r('app.string.src_camera'), id: 'harmony_camera_capture' },
+  { label: $r('app.string.src_mic'), id: 'harmony_mic_capture' },
+  { label: $r('app.string.src_desktop'), id: 'harmony_desktop_audio' },
+  { label: $r('app.string.src_image'), id: 'image_source' },
 ];
 
 @ComponentV2
@@ -33,7 +33,7 @@ export struct SourceList {
   build() {
     Column({ space: 6 }) {
       Row() {
-        Text('Sources')
+        Text($r('app.string.sources'))
           .fontSize(13)
           .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.obs_text_secondary'))
@@ -117,7 +117,7 @@ export struct SourceList {
       .scrollBar(BarState.Auto)
 
       if (this.model.selectedSceneId === '') {
-        Text('Select a scene first')
+        Text($r('app.string.select_scene_first'))
           .fontSize(11)
           .fontColor($r('app.color.obs_text_secondary'))
           .width('100%')

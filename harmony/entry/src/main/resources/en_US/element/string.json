@@ -1,0 +1,220 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "OBS Studio frontend for HarmonyOS PC"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "OBS Studio main window: scene mixing, streaming and recording"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "OBS Studio"
+    },
+    {
+      "name": "reason_microphone",
+      "value": "OBS captures microphone audio as a source for your stream or recording."
+    },
+    {
+      "name": "reason_camera",
+      "value": "OBS captures your camera as a video source for your stream or recording."
+    },
+    {
+      "name": "reason_background",
+      "value": "Keeps an active broadcast running while the OBS window is minimized or in the background."
+    },
+    {
+      "name": "reason_screen_capture",
+      "value": "OBS captures the display or a window as a video source for your stream or recording."
+    },
+    {
+      "name": "reason_screen_recording",
+      "value": "OBS records the screen for your stream or recording."
+    },
+    {
+      "name": "reason_input_monitoring",
+      "value": "OBS monitors input to show active speaking indicators."
+    },
+    {
+      "name": "app_subtitle",
+      "value": "HarmonyOS PC · 2in1"
+    },
+    {
+      "name": "core_ready",
+      "value": "core: libobs ready"
+    },
+    {
+      "name": "core_shell",
+      "value": "core: shell only"
+    },
+    {
+      "name": "scenes",
+      "value": "Scenes"
+    },
+    {
+      "name": "sources",
+      "value": "Sources"
+    },
+    {
+      "name": "audio_mixer",
+      "value": "Audio Mixer"
+    },
+    {
+      "name": "scene_default",
+      "value": "Scene 1"
+    },
+    {
+      "name": "select_scene_first",
+      "value": "Select a scene first"
+    },
+    {
+      "name": "scene_edit_unavailable",
+      "value": "Core not linked — scene editing unavailable"
+    },
+    {
+      "name": "preview_unavailable",
+      "value": "Preview unavailable — libobs core not rendering on this surface yet"
+    },
+    {
+      "name": "server",
+      "value": "Server"
+    },
+    {
+      "name": "key",
+      "value": "Key"
+    },
+    {
+      "name": "stream_start",
+      "value": "Start Streaming"
+    },
+    {
+      "name": "stream_stop",
+      "value": "Stop Streaming"
+    },
+    {
+      "name": "record_start",
+      "value": "Start Recording"
+    },
+    {
+      "name": "record_stop",
+      "value": "Stop Recording"
+    },
+    {
+      "name": "mute",
+      "value": "Mute"
+    },
+    {
+      "name": "unmute",
+      "value": "Unmute"
+    },
+    {
+      "name": "dismiss",
+      "value": "dismiss"
+    },
+    {
+      "name": "st_live",
+      "value": "LIVE"
+    },
+    {
+      "name": "st_connecting",
+      "value": "CONNECTING…"
+    },
+    {
+      "name": "st_stopping",
+      "value": "STOPPING…"
+    },
+    {
+      "name": "st_recording",
+      "value": "RECORDING"
+    },
+    {
+      "name": "st_error",
+      "value": "ERROR"
+    },
+    {
+      "name": "st_idle",
+      "value": "IDLE"
+    },
+    {
+      "name": "src_display",
+      "value": "Display"
+    },
+    {
+      "name": "src_window",
+      "value": "Window"
+    },
+    {
+      "name": "src_camera",
+      "value": "Camera"
+    },
+    {
+      "name": "src_mic",
+      "value": "Mic"
+    },
+    {
+      "name": "src_desktop",
+      "value": "Desktop"
+    },
+    {
+      "name": "src_image",
+      "value": "Image"
+    },
+    {
+      "name": "track_desktop",
+      "value": "Desktop Audio"
+    },
+    {
+      "name": "track_mic",
+      "value": "Microphone"
+    },
+    {
+      "name": "loopback_probe",
+      "value": "desktop loopback probe"
+    },
+    {
+      "name": "notice_core",
+      "value": "libobs core is not linked in this build — UI shell + audio meters only (rebuild the bridge with -DOBS_HARMONY_PREFIX=<staging>)."
+    },
+    {
+      "name": "notice_scene_fail",
+      "value": "Could not create scene '{0}' (see log for the native error)."
+    },
+    {
+      "name": "notice_pick_scene",
+      "value": "Select or create a scene before adding sources."
+    },
+    {
+      "name": "notice_add_source_fail",
+      "value": "Could not add source '{0}' — is the plugin staged?"
+    },
+    {
+      "name": "notice_stream_fail",
+      "value": "Failed to start streaming — check the RTMP target and the log."
+    },
+    {
+      "name": "notice_record_fail",
+      "value": "Failed to start recording — check the output path and the log."
+    },
+    {
+      "name": "st_unsupported",
+      "value": "unsupported on this device"
+    },
+    {
+      "name": "st_requesting",
+      "value": "waiting for system authorization…"
+    },
+    {
+      "name": "st_notauthorized",
+      "value": "capture not authorized (dialog denied)"
+    },
+    {
+      "name": "st_micdenied",
+      "value": "microphone permission denied"
+    },
+    {
+      "name": "st_capture_failed",
+      "value": "capture failed"
+    }
+  ]
+}

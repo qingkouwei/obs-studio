@@ -59,7 +59,7 @@ export struct PreviewCanvas {
       if (!this.surfaceAttached) {
         // Honest placeholder: the canvas exists (the EGL seam clears it dark
         // gray in shell-only builds), but no libobs frame producer is bound.
-        Text('Preview unavailable — libobs core not rendering on this surface yet')
+        Text($r('app.string.preview_unavailable'))
           .fontSize(12)
           .fontColor($r('app.color.obs_text_secondary'))
           .textAlign(TextAlign.Center)

@@ -40,18 +40,18 @@ export struct AudioMixer {
   }
 
   /** Human-readable state chip for non-running tracks. */
-  private stateLabel(track: AudioTrackModel): string {
+  private stateLabel(track: AudioTrackModel): string | Resource {
     switch (track.state) {
       case CaptureState.Unsupported:
-        return 'unsupported on this device';
+        return $r('app.string.st_unsupported');
       case CaptureState.Requesting:
-        return 'waiting for system authorization…';
+        return $r('app.string.st_requesting');
       case CaptureState.NotAuthorized:
-        return 'capture not authorized (dialog denied)';
+        return $r('app.string.st_notauthorized');
       case CaptureState.Failed:
-        return track.id === 'mic-audio' ? 'microphone permission denied' : 'capture failed';
+        return track.id === 'mic-audio' ? $r('app.string.st_micdenied') : $r('app.string.st_capture_failed');
       case CaptureState.Idle:
-        return 'idle';
+        return $r('app.string.st_idle');
       default:
         return '';
     }
@@ -60,7 +60,7 @@ export struct AudioMixer {
   build() {
     Column({ space: 4 }) {
       Row() {
-        Text('Audio Mixer')
+        Text($r('app.string.audio_mixer'))
           .fontSize(13)
           .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.obs_text_secondary'))
@@ -69,7 +69,8 @@ export struct AudioMixer {
           // The honest probe result: docs list Phone/Tablet/TV for the
           // PlaybackCapture syscap; on this PC/2in1 device it was not
           // confirmed, so say exactly that.
-          Text(`desktop loopback probe: syscap=${this.model.systemAudio.syscapReported ? 'yes' : 'no'} ` +
+          Text(`${this.getUIContext().getHostContext()!.resourceManager.getStringSync($r('app.string.loopback_probe').id)}: ` +
+            `syscap=${this.model.systemAudio.syscapReported ? 'yes' : 'no'} ` +
             `native=${this.model.systemAudio.nativeProbeOk ? 'yes' : 'no'}`)
             .fontSize(10)
             .fontColor($r('app.color.obs_meter_warn'))
@@ -81,7 +82,8 @@ export struct AudioMixer {
         ForEach(this.model.audioTracks, (track: AudioTrackModel) => {
           Column({ space: 4 }) {
             Row({ space: 6 }) {
-              Text(track.name)
+              Text(track.id === 'desktop-audio' ? $r('app.string.track_desktop') :
+                (track.id === 'mic-audio' ? $r('app.string.track_mic') : track.name))
                 .fontSize(12)
                 .fontColor($r('app.color.obs_text_primary'))
               if (track.state !== CaptureState.Running) {
@@ -117,7 +119,7 @@ export struct AudioMixer {
             .height(8)
 
             Row({ space: 8 }) {
-              Button(track.muted ? 'Unmute' : 'Mute')
+              Button(track.muted ? $r('app.string.unmute') : $r('app.string.mute'))
                 .type(ButtonType.Normal)
                 .fontSize(11)
                 .fontColor(track.muted ? $r('app.color.obs_live') : $r('app.color.obs_text_primary'))

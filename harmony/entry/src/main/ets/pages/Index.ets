@@ -83,7 +83,8 @@ struct Index {
     // probe system-audio support honestly, install the push-mode stats
     // callback, and start polling level meters (meters are pull by design;
     // stats are push).
-    ObsController.initialize(filesDir, codeDir, dataDir);
+    ObsController.initialize(filesDir, codeDir, dataDir,
+      this.getUIContext().getHostContext()!.resourceManager.getStringSync($r('app.string.scene_default').id));
     ObsController.installStatsCallback();
     this.levelTimerId = setInterval(() => {
       ObsController.pollLevels();
@@ -116,12 +117,12 @@ struct Index {
         .fontSize(16)
         .fontWeight(FontWeight.Bold)
         .fontColor($r('app.color.obs_text_primary'))
-      Text(this.model.coreReady ? 'core: libobs ready' : 'core: shell only')
+      Text(this.model.coreReady ? $r('app.string.core_ready') : $r('app.string.core_shell'))
         .fontSize(11)
         .fontColor(this.model.coreReady ?
         $r('app.color.obs_meter_ok') : $r('app.color.obs_meter_warn'))
       Blank()
-      Text('HarmonyOS PC · 2in1')
+      Text($r('app.string.app_subtitle'))
         .fontSize(11)
         .fontColor($r('app.color.obs_text_secondary'))
     }
@@ -156,7 +157,7 @@ struct Index {
 
   @Builder
   NoticeBanner() {
-    if (this.model.bridgeNotice !== '') {
+    if (this.model.bridgeNotice !== null) {
       Row() {
         Text(this.model.bridgeNotice)
           .fontSize(11)
@@ -164,11 +165,11 @@ struct Index {
           .maxLines(2)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .layoutWeight(1)
-        Text('dismiss')
+        Text($r('app.string.dismiss'))
           .fontSize(11)
           .fontColor($r('app.color.obs_text_secondary'))
           .onClick(() => {
-            this.model.bridgeNotice = '';
+            this.model.bridgeNotice = null;
           })
       }
       .width('100%')

@@ -13,7 +13,7 @@ export struct SceneList {
   build() {
     Column({ space: 6 }) {
       Row() {
-        Text('Scenes')
+        Text($r('app.string.scenes'))
           .fontSize(13)
           .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.obs_text_secondary'))
@@ -74,7 +74,7 @@ export struct SceneList {
       .scrollBar(BarState.Auto)
 
       if (!this.model.coreReady && this.model.scenes.length === 0) {
-        Text('Core not linked — scene editing unavailable')
+        Text($r('app.string.scene_edit_unavailable'))
           .fontSize(11)
           .fontColor($r('app.color.obs_text_secondary'))
           .width('100%')
