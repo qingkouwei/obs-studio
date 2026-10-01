@@ -114,7 +114,7 @@ export class ObsAppState {
   /** True when nativeInit() reported a fully started libobs core. */
   @Trace coreReady: boolean = false;
   /** Human-readable reason the core (or a call) is unavailable; shown in the UI. */
-  @Trace bridgeNotice: string = '';
+  @Trace bridgeNotice: Resource | null = null;
 
   @Trace scenes: SceneItemModel[] = [];
   @Trace selectedSceneId: string = '';
@@ -160,19 +160,17 @@ export class ObsController {
   private static model: ObsAppState = ObsAppState.getInstance();
 
   /** Called once from the main page's aboutToAppear(). */
-  static initialize(configDir: string, codeDir: string, dataDir: string): void {
+  static initialize(configDir: string, codeDir: string, dataDir: string, defaultSceneName: string = 'Scene 1'): void {
     const model = ObsController.model;
     model.recordingPath = `${configDir}/recording.mp4`;
     const coreOk = ObsBridge.init(configDir, codeDir, dataDir);
     model.coreReady = coreOk;
-    model.bridgeNotice = coreOk ? '' :
-      'libobs core is not linked in this build — UI shell + audio meters only ' +
-        '(rebuild the bridge with -DOBS_HARMONY_PREFIX=<staging>).';
+    model.bridgeNotice = coreOk ? null : $r('app.string.notice_core');
     ObsController.probeSystemAudio();
     ObsController.refreshTracks();
     ObsController.refreshScenes();
     if (coreOk && model.scenes.length === 0) {
-      ObsController.createScene('Scene 1');
+      ObsController.createScene(defaultSceneName);
     }
   }
 
@@ -266,7 +264,7 @@ export class ObsController {
       model.selectedSceneId = id;
       ObsController.refreshSources();
     } else {
-      model.bridgeNotice = `Could not create scene '${name}' (see log for the native error).`;
+      model.bridgeNotice = $r('app.string.notice_scene_fail', name);
     }
   }
 
@@ -284,7 +282,7 @@ export class ObsController {
   static addSource(typeId: string): void {
     const model = ObsController.model;
     if (model.selectedSceneId === '') {
-      model.bridgeNotice = 'Select or create a scene before adding sources.';
+      model.bridgeNotice = $r('app.string.notice_pick_scene');
       return;
     }
     const name = `${typeId} ${model.sourceNameCounter}`;
@@ -293,7 +291,7 @@ export class ObsController {
       model.sourceNameCounter += 1;
       ObsController.refreshSources();
     } else {
-      model.bridgeNotice = `Could not add source '${typeId}' — is the plugin staged?`;
+      model.bridgeNotice = $r('app.string.notice_add_source_fail', typeId);
     }
   }
 
@@ -382,10 +380,10 @@ export class ObsController {
       // stats push from the native thread.
       model.stats.streaming = true;
       Logger.info('stream start accepted by native');
-      model.bridgeNotice = '';
+      model.bridgeNotice = null;
     } else {
       model.connectionState = ConnectionState.Error;
-      model.bridgeNotice = 'Failed to start streaming — check the RTMP target and the log.';
+      model.bridgeNotice = $r('app.string.notice_stream_fail');
     }
   }
 
@@ -406,11 +404,11 @@ export class ObsController {
       // the button label must flip to Stop so a second tap stops.
       model.stats.recording = true;
       Logger.info(`recording start accepted by native -> ${config.path}`);
-      model.bridgeNotice = '';
+      model.bridgeNotice = null;
       ObsController.updateConnectionState();
     } else {
       model.connectionState = ConnectionState.Error;
-      model.bridgeNotice = 'Failed to start recording — check the output path and the log.';
+      model.bridgeNotice = $r('app.string.notice_record_fail');
     }
   }
 }

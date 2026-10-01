@@ -2,11 +2,11 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "面向 HarmonyOS PC 的 OBS Studio 前端"
+      "value": "OBS Studio frontend for HarmonyOS PC"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "OBS Studio 主窗口：场景混音、直播推流与录制"
+      "value": "OBS Studio main window: scene mixing, streaming and recording"
     },
     {
       "name": "EntryAbility_label",
@@ -14,27 +14,27 @@
     },
     {
       "name": "reason_microphone",
-      "value": "OBS 将麦克风采集为直播/录制的音频来源。"
+      "value": "OBS captures microphone audio as a source for your stream or recording."
     },
     {
       "name": "reason_camera",
-      "value": "OBS 将摄像头采集为直播/录制的视频来源。"
+      "value": "OBS captures your camera as a video source for your stream or recording."
     },
     {
       "name": "reason_background",
-      "value": "在 OBS 窗口最小化或退至后台时，保持正在进行的直播不中断。"
+      "value": "Keeps an active broadcast running while the OBS window is minimized or in the background."
     },
     {
       "name": "reason_screen_capture",
-      "value": "OBS 将屏幕或窗口采集为直播/录制的视频来源。"
+      "value": "OBS captures the display or a window as a video source for your stream or recording."
     },
     {
       "name": "reason_screen_recording",
-      "value": "OBS 将屏幕内容录制进你的直播或录像文件。"
+      "value": "OBS records the screen for your stream or recording."
     },
     {
       "name": "reason_input_monitoring",
-      "value": "OBS 监测音频输入以显示说话活跃指示。"
+      "value": "OBS monitors input to show active speaking indicators."
     },
     {
       "name": "app_subtitle",
@@ -42,179 +42,179 @@
     },
     {
       "name": "core_ready",
-      "value": "core: libobs 已就绪"
+      "value": "core: libobs ready"
     },
     {
       "name": "core_shell",
-      "value": "core: 仅 UI 壳"
+      "value": "core: shell only"
     },
     {
       "name": "scenes",
-      "value": "场景"
+      "value": "Scenes"
     },
     {
       "name": "sources",
-      "value": "来源"
+      "value": "Sources"
     },
     {
       "name": "audio_mixer",
-      "value": "音频混音器"
+      "value": "Audio Mixer"
     },
     {
       "name": "scene_default",
-      "value": "场景 1"
+      "value": "Scene 1"
     },
     {
       "name": "select_scene_first",
-      "value": "请先选择或创建场景"
+      "value": "Select a scene first"
     },
     {
       "name": "scene_edit_unavailable",
-      "value": "内核未链接 — 无法编辑场景"
+      "value": "Core not linked — scene editing unavailable"
     },
     {
       "name": "preview_unavailable",
-      "value": "预览不可用 — libobs 内核尚未渲染到此表面"
+      "value": "Preview unavailable — libobs core not rendering on this surface yet"
     },
     {
       "name": "server",
-      "value": "服务器"
+      "value": "Server"
     },
     {
       "name": "key",
-      "value": "串流密钥"
+      "value": "Key"
     },
     {
       "name": "stream_start",
-      "value": "开始直播"
+      "value": "Start Streaming"
     },
     {
       "name": "stream_stop",
-      "value": "停止直播"
+      "value": "Stop Streaming"
     },
     {
       "name": "record_start",
-      "value": "开始录制"
+      "value": "Start Recording"
     },
     {
       "name": "record_stop",
-      "value": "停止录制"
+      "value": "Stop Recording"
     },
     {
       "name": "mute",
-      "value": "静音"
+      "value": "Mute"
     },
     {
       "name": "unmute",
-      "value": "取消静音"
+      "value": "Unmute"
     },
     {
       "name": "dismiss",
-      "value": "忽略"
+      "value": "dismiss"
     },
     {
       "name": "st_live",
-      "value": "直播中"
+      "value": "LIVE"
     },
     {
       "name": "st_connecting",
-      "value": "连接中…"
+      "value": "CONNECTING…"
     },
     {
       "name": "st_stopping",
-      "value": "停止中…"
+      "value": "STOPPING…"
     },
     {
       "name": "st_recording",
-      "value": "录制中"
+      "value": "RECORDING"
     },
     {
       "name": "st_error",
-      "value": "错误"
+      "value": "ERROR"
     },
     {
       "name": "st_idle",
-      "value": "空闲"
+      "value": "IDLE"
     },
     {
       "name": "src_display",
-      "value": "捕获屏幕"
+      "value": "Display"
     },
     {
       "name": "src_window",
-      "value": "捕获窗口"
+      "value": "Window"
     },
     {
       "name": "src_camera",
-      "value": "摄像头"
+      "value": "Camera"
     },
     {
       "name": "src_mic",
-      "value": "麦克风"
+      "value": "Mic"
     },
     {
       "name": "src_desktop",
-      "value": "桌面音频"
+      "value": "Desktop"
     },
     {
       "name": "src_image",
-      "value": "图片"
+      "value": "Image"
     },
     {
       "name": "track_desktop",
-      "value": "桌面音频"
+      "value": "Desktop Audio"
     },
     {
       "name": "track_mic",
-      "value": "麦克风"
+      "value": "Microphone"
     },
     {
       "name": "loopback_probe",
-      "value": "桌面内录探测"
+      "value": "desktop loopback probe"
     },
     {
       "name": "notice_core",
-      "value": "此构建未链接 libobs 内核 — 仅有 UI 壳 + 音频表（用 -DOBS_HARMONY_PREFIX=<staging> 重新构建桥接层）"
+      "value": "libobs core is not linked in this build — UI shell + audio meters only (rebuild the bridge with -DOBS_HARMONY_PREFIX=<staging>)."
     },
     {
       "name": "notice_scene_fail",
-      "value": "无法创建场景“{0}”（原生错误见日志）"
+      "value": "Could not create scene '{0}' (see log for the native error)."
     },
     {
       "name": "notice_pick_scene",
-      "value": "添加来源前请先选择或创建场景"
+      "value": "Select or create a scene before adding sources."
     },
     {
       "name": "notice_add_source_fail",
-      "value": "无法添加来源“{0}”——插件是否已随包暂存？"
+      "value": "Could not add source '{0}' — is the plugin staged?"
     },
     {
       "name": "notice_stream_fail",
-      "value": "直播启动失败——检查 RTMP 目标地址与日志。"
+      "value": "Failed to start streaming — check the RTMP target and the log."
     },
     {
       "name": "notice_record_fail",
-      "value": "录制启动失败——检查输出路径与日志。"
+      "value": "Failed to start recording — check the output path and the log."
     },
     {
       "name": "st_unsupported",
-      "value": "本机不支持"
+      "value": "unsupported on this device"
     },
     {
       "name": "st_requesting",
-      "value": "等待系统授权…"
+      "value": "waiting for system authorization…"
     },
     {
       "name": "st_notauthorized",
-      "value": "未授权采集（弹窗被拒）"
+      "value": "capture not authorized (dialog denied)"
     },
     {
       "name": "st_micdenied",
-      "value": "麦克风权限被拒"
+      "value": "microphone permission denied"
     },
     {
       "name": "st_capture_failed",
-      "value": "采集失败"
+      "value": "capture failed"
     }
   ]
 }

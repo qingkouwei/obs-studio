@@ -22,20 +22,20 @@ export struct TransportBar {
     return `${pad(hh)}:${pad(mm)}:${pad(ss)}`;
   }
 
-  private connectionLabel(): string {
+  private connectionLabel(): Resource {
     switch (this.model.connectionState) {
       case ConnectionState.Live:
-        return 'LIVE';
+        return $r('app.string.st_live');
       case ConnectionState.Starting:
-        return 'CONNECTING…';
+        return $r('app.string.st_connecting');
       case ConnectionState.Stopping:
-        return 'STOPPING…';
+        return $r('app.string.st_stopping');
       case ConnectionState.Recording:
-        return 'RECORDING';
+        return $r('app.string.st_recording');
       case ConnectionState.Error:
-        return 'ERROR';
+        return $r('app.string.st_error');
       default:
-        return 'IDLE';
+        return $r('app.string.st_idle');
     }
   }
 
@@ -56,10 +56,10 @@ export struct TransportBar {
     Column({ space: 6 }) {
       // RTMP target row -----------------------------------------------------
       Row({ space: 8 }) {
-        Text('Server')
+        Text($r('app.string.server'))
           .fontSize(11)
           .fontColor($r('app.color.obs_text_secondary'))
-          .width(48)
+          .width(56)
         TextInput({ text: this.model.streamingServer, placeholder: 'rtmp://…' })
           .fontSize(12)
           .fontColor($r('app.color.obs_text_primary'))
@@ -72,11 +72,12 @@ export struct TransportBar {
           .onChange((value: string) => {
             this.model.streamingServer = value;
           })
-        Text('Key')
+        Text($r('app.string.key'))
           .fontSize(11)
           .fontColor($r('app.color.obs_text_secondary'))
-          .width(28)
-        TextInput({ text: this.model.streamingKey, placeholder: 'stream key' })
+          .width(60)
+          .maxLines(1)
+        TextInput({ text: this.model.streamingKey, placeholder: $r('app.string.key') })
           .fontSize(12)
           .fontColor($r('app.color.obs_text_primary'))
           .placeholderColor($r('app.color.obs_text_secondary'))
@@ -121,7 +122,7 @@ export struct TransportBar {
 
         Blank()
 
-        Button(this.model.stats.streaming ? 'Stop Streaming' : 'Start Streaming')
+        Button(this.model.stats.streaming ? $r('app.string.stream_stop') : $r('app.string.stream_start'))
           .type(ButtonType.Normal)
           .fontSize(13)
           .fontWeight(FontWeight.Medium)
@@ -136,7 +137,7 @@ export struct TransportBar {
             ObsController.toggleStreaming();
           })
 
-        Button(this.model.stats.recording ? 'Stop Recording' : 'Start Recording')
+        Button(this.model.stats.recording ? $r('app.string.record_stop') : $r('app.string.record_start'))
           .type(ButtonType.Normal)
           .fontSize(13)
           .fontWeight(FontWeight.Medium)
