@@ -3,8 +3,17 @@ cmake_minimum_required(VERSION 3.28...3.30)
 add_library(libobs-opengl SHARED)
 add_library(OBS::libobs-opengl ALIAS libobs-opengl)
 
-if(NOT TARGET OBS::glad)
+# deps/glad generates and loads desktop OpenGL and unconditionally calls
+# find_package(OpenGL REQUIRED), neither of which is valid on HarmonyOS. The
+# OpenGL ES entry points there come straight out of libGLESv3.so, and the
+# shim under harmony/glad satisfies the <glad/glad.h> includes everywhere
+# else in this directory, so glad is skipped entirely for that target.
+if(NOT OS_HARMONY AND NOT TARGET OBS::glad)
   add_subdirectory("${CMAKE_SOURCE_DIR}/deps/glad" "${CMAKE_BINARY_DIR}/deps/glad")
+endif()
+
+if(OS_HARMONY)
+  harmony_setup_platform_libraries()
 endif()
 
 if(OS_LINUX OR OS_FREEBSD OR OS_OPENBSD)
@@ -28,6 +37,8 @@ target_sources(
     $<$<PLATFORM_ID:Linux,FreeBSD,OpenBSD>:gl-nix.c>
     $<$<PLATFORM_ID:Linux,FreeBSD,OpenBSD>:gl-x11-egl.c>
     $<$<PLATFORM_ID:Windows>:gl-windows.c>
+    $<$<BOOL:${OS_HARMONY}>:gl-harmony-egl.c>
+    $<$<BOOL:${OS_HARMONY}>:gl-harmony-egl.h>
     gl-helpers.c
     gl-helpers.h
     gl-indexbuffer.c
@@ -44,6 +55,13 @@ target_sources(
     gl-zstencil.c
 )
 
+# Must precede OBS::glad's include directory so the GLES shim is the one that
+# resolves <glad/glad.h>. Harmless on other platforms because the directory is
+# only populated for HarmonyOS builds.
+if(OS_HARMONY)
+  target_include_directories(libobs-opengl PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/harmony")
+endif()
+
 target_compile_options(libobs-opengl PRIVATE $<$<COMPILE_LANG_AND_ID:C,AppleClang,Clang>:-Wno-strict-prototypes>)
 
 target_compile_definitions(libobs-opengl PRIVATE $<$<PLATFORM_ID:Darwin>:GL_SILENCE_DEPRECATION>)
@@ -52,7 +70,7 @@ target_link_libraries(
   libobs-opengl
   PRIVATE
     OBS::libobs
-    OBS::glad
+    $<$<NOT:$<BOOL:${OS_HARMONY}>>:OBS::glad>
     "$<$<PLATFORM_ID:Darwin>:$<LINK_LIBRARY:FRAMEWORK,Cocoa.framework>>"
     "$<$<PLATFORM_ID:Darwin>:$<LINK_LIBRARY:FRAMEWORK,IOSurface.framework>>"
     $<$<PLATFORM_ID:Linux,FreeBSD,OpenBSD>:Libdrm::Libdrm>
@@ -60,6 +78,10 @@ target_link_libraries(
     $<$<PLATFORM_ID:Linux,FreeBSD,OpenBSD>:X11::XCB>
     $<$<AND:$<PLATFORM_ID:Linux,FreeBSD,OpenBSD>,$<BOOL:${ENABLE_WAYLAND}>>:OpenGL::EGL>
     $<$<AND:$<PLATFORM_ID:Linux,FreeBSD,OpenBSD>,$<BOOL:${ENABLE_WAYLAND}>>:Wayland::Egl>
+    $<$<BOOL:${OS_HARMONY}>:HarmonyOS::EGL>
+    $<$<BOOL:${OS_HARMONY}>:HarmonyOS::GLESv3>
+    $<$<BOOL:${OS_HARMONY}>:HarmonyOS::native_window>
+    $<$<BOOL:${OS_HARMONY}>:HarmonyOS::hilog>
 )
 
 if(OS_WINDOWS)

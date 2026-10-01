@@ -38,6 +38,11 @@ typedef signed long ssize_t;
 #else
 typedef signed int ssize_t;
 #endif
+#else
+// POSIX declares ssize_t in <sys/types.h>. glibc's <stdio.h> and <string.h>
+// happen to pull it in transitively, musl's do not, so include it explicitly
+// rather than depending on the host libc's header graph.
+#include <sys/types.h>
 #endif
 
 typedef enum {

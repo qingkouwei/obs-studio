@@ -1,0 +1,43 @@
+{
+  "apiType": "stageMode",
+  "buildOption": {
+    "externalNativeOptions": {
+      "path": "./src/main/cpp/CMakeLists.txt",
+      // To build the bridge against a cross-compiled libobs, either:
+      //   1. set OBS_HARMONY_PREFIX here, e.g. "-DOBS_HARMONY_PREFIX=/path/to/staging", or
+      //   2. export OBS_HARMONY_PREFIX in the environment before invoking hvigorw
+      //      (the CMakeLists picks the env var up as a fallback).
+      // The staging dir must contain include/ (libobs headers) and lib/libobs.so.
+      // Without it the bridge builds in shell-only mode (HAVE_LIBOBS undefined).
+      // Leave empty: the bridge's CMakeLists auto-discovers the staging prefix
+      // at <repo>/.ohos-stage (produced by build-aux/harmony/stage-native.sh),
+      // so no machine-specific absolute path needs to be committed here.
+      // Override with "-DOBS_HARMONY_PREFIX=/custom/path" only if you stage
+      // elsewhere. Do NOT rely on the OBS_HARMONY_PREFIX environment variable:
+      // hvigor does not reliably forward the parent shell's environment into the
+      // CMake configure it spawns, and a cached empty value in entry/.cxx then
+      // silently keeps the bridge in shell-only mode.
+      "arguments": "",
+      "cppFlags": "-std=c++17 -fexceptions",
+      "abiFilters": ["arm64-v8a"]
+    }
+  },
+  "buildOptionSet": [
+    {
+      "name": "release",
+      "arkOptions": {
+        "obfuscation": {
+          "ruleOptions": {
+            "enable": false,
+            "files": ["./obfuscation-rules.txt"]
+          }
+        }
+      }
+    }
+  ],
+  "targets": [
+    {
+      "name": "default"
+    }
+  ]
+}

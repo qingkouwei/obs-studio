@@ -1,0 +1,48 @@
+{
+  "color": [
+    {
+      "name": "start_window_background",
+      "value": "#1B1D21"
+    },
+    {
+      "name": "obs_background",
+      "value": "#1B1D21"
+    },
+    {
+      "name": "obs_panel",
+      "value": "#24262B"
+    },
+    {
+      "name": "obs_panel_border",
+      "value": "#33363C"
+    },
+    {
+      "name": "obs_text_primary",
+      "value": "#E2E4E7"
+    },
+    {
+      "name": "obs_text_secondary",
+      "value": "#9AA0A6"
+    },
+    {
+      "name": "obs_accent",
+      "value": "#3D7EFF"
+    },
+    {
+      "name": "obs_live",
+      "value": "#E5484D"
+    },
+    {
+      "name": "obs_meter_ok",
+      "value": "#30A46C"
+    },
+    {
+      "name": "obs_meter_warn",
+      "value": "#F5A623"
+    },
+    {
+      "name": "obs_meter_clip",
+      "value": "#E5484D"
+    }
+  ]
+}

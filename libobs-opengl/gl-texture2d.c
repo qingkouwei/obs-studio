@@ -34,6 +34,16 @@ static bool upload_texture_2d(struct gs_texture_2d *tex, const uint8_t **data)
 	success = gl_init_face(GL_TEXTURE_2D, tex->base.gl_type, num_levels, tex->base.gl_format,
 			       tex->base.gl_internal_format, compressed, tex->width, tex->height, tex_size, &data);
 
+#ifdef __OHOS__
+	if (!success)
+		blog(LOG_ERROR,
+		     "upload_texture_2d params: fmt=0x%x internal=0x%x type=0x%x %ux%u levels=%u size=%u "
+		     "gsfmt=%d dyn=%d rt=%d",
+		     (unsigned)tex->base.gl_format, (unsigned)tex->base.gl_internal_format,
+		     (unsigned)tex->base.gl_type, tex->width, tex->height, num_levels, tex_size,
+		     (int)tex->base.format, (int)tex->base.is_dynamic, (int)tex->base.is_render_target);
+#endif
+
 	if (!gl_tex_param_i(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, num_levels - 1))
 		success = false;
 	if (!gl_bind_texture(GL_TEXTURE_2D, 0))
@@ -101,6 +111,26 @@ gs_texture_t *device_texture_create(gs_device_t *device, uint32_t width, uint32_
 			goto fail;
 		if (!upload_texture_2d(tex, data))
 			goto fail;
+
+#ifdef __OHOS__
+		/* GLES' default GL_TEXTURE_MIN_FILTER is
+		 * GL_NEAREST_MIPMAP_LINEAR. libobs never builds mip chains
+		 * for these single-level textures, so the mipmap filter
+		 * makes every one of them INCOMPLETE: hardware sampling
+		 * returns (0,0,0,1) — a black source, a black canvas —
+		 * while direct texel reads still see the data. Desktop GL
+		 * hides this because OBS always binds an explicit sampler
+		 * object; on this driver the sampler path does not cover
+		 * every bind, so give each texture a safe non-mipmap
+		 * default at creation. */
+		if (!gl_bind_texture(GL_TEXTURE_2D, tex->base.texture))
+			goto fail;
+		gl_tex_param_i(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+		gl_tex_param_i(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		gl_tex_param_i(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		if (!gl_bind_texture(GL_TEXTURE_2D, 0))
+			goto fail;
+#endif
 	} else {
 		if (!gl_bind_texture(GL_TEXTURE_2D, tex->base.texture))
 			goto fail;
@@ -258,7 +288,12 @@ bool gs_texture_is_rect(const gs_texture_t *tex)
 void *gs_texture_get_obj(gs_texture_t *tex)
 {
 	struct gs_texture_2d *tex2d = (struct gs_texture_2d *)tex;
-	if (!is_texture_2d(tex, "gs_texture_get_obj")) {
+
+	/* Pure metadata read (the GL name), no GL calls: safe outside a
+	 * graphics context. The GPU encode thread reads texture names before
+	 * making its own shared context current, so the usual gs_valid
+	 * context guard would dead-end every cross-thread texture encoder. */
+	if (!tex || tex->type != GS_TEXTURE_2D) {
 		blog(LOG_ERROR, "gs_texture_get_obj (GL) failed");
 		return NULL;
 	}

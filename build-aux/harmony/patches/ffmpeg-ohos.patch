@@ -1,0 +1,45 @@
+# PLACEHOLDER PATCH — ffmpeg-ohos.patch
+#
+# This file intentionally contains NO diff hunks, so build-deps.sh detects it
+# as a placeholder and skips it (see apply_patches()). Do not delete it: it
+# documents where and how to put the real fix when FFmpeg fails to build
+# against musl/OHOS.
+#
+# How to use:
+#   1. Run build-deps.sh --only ffmpeg and inspect
+#      <work-dir>/logs/ffmpeg.log for the first real error.
+#   2. Edit the extracted sources under <work-dir>/ffmpeg-7.1/ to fix it.
+#   3. From that directory: git diff > <repo>/build-aux/harmony/patches/ffmpeg-ohos.patch
+#      (or `diff -ruN pristine fixed > ffmpeg-ohos.patch`). Paths must apply
+#      with `patch -p1` (a/ b/ prefixes are fine).
+#   4. Re-run build-deps.sh --only ffmpeg --fresh.
+#
+# What typically needs patching when porting FFmpeg 7.x to a musl/OHOS target
+# configured as --target-os=linux (all are guesses until the first real build;
+# keep this list as a debugging map):
+#
+#   * HAVE_* misdetections: configure compiles probes with the cross CC, but
+#     a few checks test glibc-only facilities that musl declares in headers
+#     yet does not implement (or implements differently), e.g. sys/sysctl.h
+#     based code paths, malloc_trim(), GNU-specific pthread options. Symptom:
+#     undefined symbol at link time — the OHOS toolchain links with
+#     -Wl,--no-undefined, so this is a hard error, not a warning. Fix by
+#     forcing the HAVE_ macro off via a patch to config.h generation or by
+#     #if defined(__GLIBC__) guards around the call site.
+#
+#   * libavutil/mem.c and friends: alignment/allocation helpers that assume
+#     glibc behavior (aligned_alloc availability/semantics, posix_memalign
+#     errno details). musl provides the POSIX APIs but edge cases differ.
+#
+#   * Missing/renamed syscall plumbing: sys/syscall.h constants (SYS_*) used
+#     under #ifdef __linux__ that OHOS's musl fork does not define (e.g.
+#     prctl-adjacent code, pidfd, getrandom fallbacks). Guard with
+#     #ifdef SYS_xxx or __OHOS__ checks.
+#
+#   * clock/thread CPU-affinity APIs (sched_setaffinity, pthread_getname_np
+#     signature differences) used by libavcodec/pthread_*.c and the aarch64
+#     cpu detection code.
+#
+#   * If arm64 assembly (.S under libavcodec/aarch64/) fails to assemble
+#     with the OHOS clang 15, first try building with --disable-asm added in
+#     deps/ffmpeg.sh to confirm asm is the culprit before patching.

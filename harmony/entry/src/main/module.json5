@@ -1,0 +1,134 @@
+{
+  "module": {
+    "name": "entry",
+    "type": "entry",
+    "description": "$string:module_desc",
+    "mainElement": "EntryAbility",
+    // HarmonyOS PC / 2in1 is the primary target. Free (floating) windows are
+    // the norm there, so supportWindowMode includes all three desktop modes and
+    // a minimum window size suitable for a streaming control surface.
+    //
+    // "phone" is included so the native stack can be validated on a handset
+    // before PC hardware is available: same arm64-v8a ABI, same API 26. Phone
+    // also officially supports SystemCapability.Multimedia.Audio.PlaybackCapture,
+    // which lets the desktop-audio loopback path be exercised for real. The PC
+    // support status of that syscap is still unverified (see
+    // docs/harmonyos-migration.md §7.4). Drop "phone" here if the app is ever
+    // shipped PC-only.
+    "deviceTypes": ["2in1", "phone"],
+    "deliveryWithInstall": true,
+    "installationFree": false,
+    "pages": "$profile:main_pages",
+    // Required, not optional: libobs loads its plugins with os_dlopen() on a
+    // filesystem path, so the .so files must be extracted out of the HAP into
+    // the application sandbox. Leaving this false keeps them packed inside the
+    // HAP, where no path-based dlopen can reach them.
+    "extractNativeLibs": true,
+    // NOTE (API 24+): a HAP may also embed ELF executables via
+    // "executableBinaryPaths" together with "extractNativeLibs": true. That is
+    // the intended path for shipping obs CLI helpers (e.g. an obs-ffmpeg-mux
+    // helper binary) inside the HAP. It is deliberately NOT configured here
+    // until such helpers are cross-compiled for HarmonyOS.
+    "requestPermissions": [
+      {
+        // RTMP push / network streaming.
+        "name": "ohos.permission.INTERNET"
+      },
+      {
+        // user_grant: requested at runtime via requestPermissionsFromUser().
+        "name": "ohos.permission.MICROPHONE",
+        "reason": "$string:reason_microphone",
+        "usedScene": {
+          "abilities": ["EntryAbility"],
+          "when": "inuse"
+        }
+      },
+      {
+        // user_grant: requested at runtime via requestPermissionsFromUser().
+        // Drives the harmony-camera capture source (Camera Kit NDK); without
+        // it OH_CameraInput_Open fails with CAMERA_OPERATION_NOT_ALLOWED.
+        "name": "ohos.permission.CAMERA",
+        "reason": "$string:reason_camera",
+        "usedScene": {
+          "abilities": ["EntryAbility"],
+          "when": "inuse"
+        }
+      },
+      {
+        // Required to keep streaming/recording alive while the window is
+        // minimized or in the background on PC.
+        "name": "ohos.permission.KEEP_BACKGROUND_RUNNING",
+        "reason": "$string:reason_background",
+        "usedScene": {
+          "abilities": ["EntryAbility"],
+          "when": "inuse"
+        }
+      },
+      {
+        // user_grant, supported on PC/2in1 since API 14. Drives
+        // OH_AVScreenCapture display/window capture sources.
+        "name": "ohos.permission.CUSTOM_SCREEN_CAPTURE",
+        "reason": "$string:reason_screen_capture",
+        "usedScene": {
+          "abilities": ["EntryAbility"],
+          "when": "inuse"
+        }
+      },
+      {
+        // RESTRICTED permission: suppresses the recurring system privacy dialog
+        // during screen recording. Requires an AGC application/approval and a
+        // release profile that grants it; debug auto-signing will REJECT it.
+        // The app must (and does) degrade gracefully without it: recording
+        // still works, the user just sees the system dialog each session.
+        "name": "ohos.permission.CUSTOM_SCREEN_RECORDING",
+        "reason": "$string:reason_screen_recording",
+        "usedScene": {
+          "abilities": ["EntryAbility"],
+          "when": "inuse"
+        }
+      },
+      {
+        // RESTRICTED (system_basic): global hotkeys (Start/Stop streaming,
+        // Push-to-Talk) while OBS is not focused. Requires AGC review
+        // (~3 working days). Without it, hotkeys only work in-app and the
+        // global hotkey feature must stay disabled.
+        "name": "ohos.permission.INPUT_MONITORING",
+        "reason": "$string:reason_input_monitoring",
+        "usedScene": {
+          "abilities": ["EntryAbility"],
+          "when": "inuse"
+        }
+      }
+    ],
+    "abilities": [
+      {
+        "name": "EntryAbility",
+        "srcEntry": "./ets/entryability/EntryAbility.ets",
+        "description": "$string:EntryAbility_desc",
+        "icon": "$media:icon",
+        "label": "$string:EntryAbility_label",
+        "startWindowIcon": "$media:start_icon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": true,
+        "supportWindowMode": ["fullscreen", "split", "floating"],
+        // Minimum free-window size for a desktop streaming control surface.
+        // This SDK's module schema spells the PC min-size keys as
+        // minWindowWidth/minWindowHeight (logical px), which is what the
+        // windowSize {minWidth, minHeight} intent maps to here.
+        "minWindowWidth": 1024,
+        "minWindowHeight": 640,
+        "skills": [
+          {
+            "entities": ["entity.system.home"],
+            "actions": ["action.system.home"]
+          }
+        ]
+      }
+    ],
+    // Desktop Extension Kit (status bar / quickbar dock integration) requires
+    // HarmonyOS 6.0.2(22)+ and is China-mainland only. A guarded stub lives in
+    // ets/common/DesktopExtensionStub.ets; nothing is declared here until the
+    // extension is implemented and region-gated.
+    "extensionAbilities": []
+  }
+}
