@@ -85,7 +85,8 @@ struct Index {
     // callback, and start polling level meters (meters are pull by design;
     // stats are push).
     ObsController.initialize(filesDir, codeDir, dataDir,
-      this.getUIContext().getHostContext()!.resourceManager.getStringSync($r('app.string.scene_default').id));
+      this.getUIContext().getHostContext()!.resourceManager.getStringSync($r('app.string.scene_default').id),
+      this.getUIContext().getHostContext() as common.UIAbilityContext);
     ObsController.installStatsCallback();
     this.levelTimerId = setInterval(() => {
       ObsController.pollLevels();
