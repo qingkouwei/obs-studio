@@ -148,7 +148,7 @@ ArkTS: context.filesDir + "/obsdata"                 ← rawfile 提取目标，
 源:  harmony_display_capture  harmony_window_capture  harmony_camera_capture
      harmony_mic_capture      harmony_desktop_audio   image_source
 编码器: harmony_h264  harmony_hevc  obs_x264  ffmpeg_aac
-输出: rtmp_output     ffmpeg_muxer
+输出: rtmp_output     mp4_output（录制用；ffmpeg_muxer 需 fork 子进程，沙箱禁用不了）
 ```
 
 曾发现 UI 请求 `harmony_screen_capture`（不存在），已修。`check-contracts.sh` 第 1 项专防此类问题。
