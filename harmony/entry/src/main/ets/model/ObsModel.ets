@@ -2,6 +2,8 @@ import { NativeAudioTrack, NativeFilterEntry, NativeOutputLevel, NativeSceneEntr
   NativeSourceEntry, NativeStreamStats } from 'libobs_bridge.so';
 import { ObsBridge, SystemAudioCapability } from '../napi/obsBridge';
 import { Logger } from '../common/Logger';
+import { LongRunningTask } from '../common/LongRunningTask';
+import { common } from '@kit.AbilityKit';
 
 /**
  * Observable application state for the OBS ArkUI frontend, plus the
@@ -176,10 +178,16 @@ class RecordingConfig {
  */
 export class ObsController {
   private static model: ObsAppState = ObsAppState.getInstance();
+  /** UIAbility context, used for continuous-task acquire/release. */
+  static appContext: common.UIAbilityContext | undefined = undefined;
 
   /** Called once from the main page's aboutToAppear(). */
-  static initialize(configDir: string, codeDir: string, dataDir: string, defaultSceneName: string = 'Scene 1'): void {
+  static initialize(configDir: string, codeDir: string, dataDir: string, defaultSceneName: string = 'Scene 1',
+    context?: common.UIAbilityContext): void {
     const model = ObsController.model;
+    if (context) {
+      ObsController.appContext = context;
+    }
     model.recordingPath = `${configDir}/recording.mp4`;
     const coreOk = ObsBridge.init(configDir, codeDir, dataDir);
     model.coreReady = coreOk;
@@ -446,6 +454,9 @@ export class ObsController {
       const stats = ObsBridge.getStats();
       model.stats.streaming = stats.streaming;
       ObsController.updateConnectionState();
+      if (!model.stats.streaming && !model.stats.recording && ObsController.appContext) {
+        LongRunningTask.release(ObsController.appContext, 'stream stopped');
+      }
       return;
     }
     const config = new StreamingConfig();
@@ -459,6 +470,9 @@ export class ObsController {
       model.stats.streaming = true;
       Logger.info('stream start accepted by native');
       model.bridgeNotice = null;
+      if (ObsController.appContext) {
+        LongRunningTask.acquire(ObsController.appContext, 'stream started');
+      }
     } else {
       model.connectionState = ConnectionState.Error;
       model.bridgeNotice = $r('app.string.notice_stream_fail');
@@ -472,6 +486,9 @@ export class ObsController {
       const stats = ObsBridge.getStats();
       model.stats.recording = stats.recording;
       ObsController.updateConnectionState();
+      if (!model.stats.recording && !model.stats.streaming && ObsController.appContext) {
+        LongRunningTask.release(ObsController.appContext, 'record stopped');
+      }
       return;
     }
     const config = new RecordingConfig();
@@ -484,6 +501,9 @@ export class ObsController {
       Logger.info(`recording start accepted by native -> ${config.path}`);
       model.bridgeNotice = null;
       ObsController.updateConnectionState();
+      if (ObsController.appContext) {
+        LongRunningTask.acquire(ObsController.appContext, 'record started');
+      }
     } else {
       model.connectionState = ConnectionState.Error;
       model.bridgeNotice = $r('app.string.notice_record_fail');

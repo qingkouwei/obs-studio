@@ -112,6 +112,14 @@
         "name": "EntryAbility",
         "srcEntry": "./ets/entryability/EntryAbility.ets",
         "description": "$string:EntryAbility_desc",
+        // Long-running task types (Background Tasks Kit). OBS holds an audio
+        // capturer (mic + PlaybackCapture loopback) while recording/streaming;
+        // without an audioRecording continuous task the suspend manager kills
+        // the process at screen-off with
+        // ILLEGAL_AUDIO_CAPTURER_BY_SUSPEND (verified on device 2026-10-02).
+        "backgroundModes": [
+          "audioRecording"
+        ],
         "icon": "$media:icon",
         "label": "$string:EntryAbility_label",
         "startWindowIcon": "$media:start_icon",
