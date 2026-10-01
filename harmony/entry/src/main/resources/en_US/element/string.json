@@ -243,6 +243,10 @@
     {
       "name": "filter_sharpness",
       "value": "Sharpen"
+    },
+    {
+      "name": "scene_named",
+      "value": "Scene %s"
     }
   ]
 }

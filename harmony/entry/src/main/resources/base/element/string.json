@@ -243,6 +243,10 @@
     {
       "name": "filter_sharpness",
       "value": "锐化"
+    },
+    {
+      "name": "scene_named",
+      "value": "场景 %s"
     }
   ]
 }
