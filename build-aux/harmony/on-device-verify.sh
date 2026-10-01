@@ -76,6 +76,18 @@ wait_tap() {
     return 1
 }
 
+# wait_tap_any <text1> [text2 ...] — try several labels (i18n: zh default, en fallback)
+wait_tap_any() {
+    local tries="${TRIES:-6}" i t
+    for ((i = 0; i < tries; i++)); do
+        for t in "$@"; do
+            tap_text "$t" && return 0
+        done
+        sleep 2
+    done
+    return 1
+}
+
 if [ -n "$HAP" ]; then
     echo "[install] $HAP"
     tconn; "$HDC" install -r "$HAP" 2>&1 | tr -d '\r' | tail -1
@@ -105,7 +117,7 @@ while [ $miss -lt 3 ]; do
 done
 
 echo "[4] add Display capture source"
-tap_text "Display"
+wait_tap_any "捕获屏幕" "Display"
 sleep 4
 
 echo "[5] confirm share picker (开始共享)"
@@ -114,19 +126,19 @@ sleep "$WAIT"
 
 if [ "$STREAM" = "1" ]; then
     echo "[5a] streaming: start → ${STREAM_SECS:-10}s → stop"
-    tap_text "Start Streaming"
+    wait_tap_any "开始直播" "Start Streaming"
     sleep "${STREAM_SECS:-10}"
     shell "hilog -x | grep -iE 'streaming started|rtmp|connect' | grep obs_bridge | tail -6"
-    wait_tap "Stop Streaming" 5
+    wait_tap_any "停止直播" "Stop Streaming"
     sleep 3
 fi
 
 if [ "$RECORD" = "1" ]; then
-    echo "[5b] recording: start → 8s → stop"
-    tap_text "Start Recording"
-    sleep 8
+    echo "[5b] recording: start → ${RECORD_SECS:-8}s → stop"
+    wait_tap_any "开始录制" "Start Recording"
+    sleep "${RECORD_SECS:-8}"
     shell "hilog -x | grep -E 'recording started|encoder|mp4|mux' | tail -6"
-    wait_tap "Stop Recording" 6
+    wait_tap_any "停止录制" "Stop Recording"
     sleep 4
 fi
 
