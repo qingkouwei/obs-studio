@@ -58,6 +58,10 @@ add_obs_plugin(
     PLATFORMS WINDOWS MACOS LINUX
     WITH_MESSAGE
 )
+add_obs_plugin(harmony-audio PLATFORMS HARMONY WITH_MESSAGE)
+add_obs_plugin(harmony-camera PLATFORMS HARMONY WITH_MESSAGE)
+add_obs_plugin(harmony-capture PLATFORMS HARMONY WITH_MESSAGE)
+add_obs_plugin(harmony-vcodec PLATFORMS HARMONY WITH_MESSAGE)
 add_obs_plugin(image-source)
 add_obs_plugin(linux-alsa PLATFORMS LINUX FREEBSD OPENBSD)
 add_obs_plugin(linux-capture PLATFORMS LINUX FREEBSD OPENBSD)
@@ -76,7 +80,11 @@ check_obs_browser()
 
 add_obs_plugin(obs-ffmpeg)
 add_obs_plugin(obs-filters)
-add_obs_plugin(obs-libfdk)
+# libfdk-aac is not cross-compiled for HarmonyOS. Not a functional loss: the
+# obs-deps FFmpeg build enables its native aac encoder.
+if(NOT OS_HARMONY)
+  add_obs_plugin(obs-libfdk)
+endif()
 add_obs_plugin(obs-nvenc PLATFORMS WINDOWS LINUX ARCHITECTURES x64 x86_64)
 add_obs_plugin(obs-outputs)
 add_obs_plugin(
@@ -91,16 +99,30 @@ add_obs_plugin(
     PLATFORMS WINDOWS MACOS LINUX
     WITH_MESSAGE
 )
-add_obs_plugin(obs-webrtc)
+# obs-webrtc needs libdatachannel, which is not cross-compiled for HarmonyOS.
+add_obs_plugin(obs-webrtc PLATFORMS WINDOWS MACOS LINUX)
 
-check_obs_websocket()
+# obs-websocket is a git submodule that depends on asio and websocketpp; neither
+# is available for OHOS yet, and the ArkUI frontend talks to libobs in-process
+# rather than over a socket.
+if(NOT OS_HARMONY)
+  check_obs_websocket()
+endif()
 
 add_obs_plugin(obs-x264)
 add_obs_plugin(oss-audio PLATFORMS FREEBSD OPENBSD)
 add_obs_plugin(rtmp-services)
 add_obs_plugin(sndio PLATFORMS LINUX FREEBSD OPENBSD)
+# text-freetype2 needs FreeType, which build-aux/harmony/deps/freetype.sh
+# cross-compiles as a static, PIC library with every optional back end disabled
+# (harfbuzz, fontconfig, brotli, bzip2, png, system zlib), so the whole chain is
+# one self-contained libfreetype.a absorbed into text-freetype2.so. Font
+# discovery on OHOS does not go through fontconfig: plugins/text-freetype2/
+# find-font-ohos.c scans /system/fonts directly. vlc-video still needs libvlc.
 add_obs_plugin(text-freetype2)
-add_obs_plugin(vlc-video WITH_MESSAGE)
+if(NOT OS_HARMONY)
+  add_obs_plugin(vlc-video WITH_MESSAGE)
+endif()
 add_obs_plugin(win-capture PLATFORMS WINDOWS)
 add_obs_plugin(win-dshow PLATFORMS WINDOWS)
 add_obs_plugin(win-wasapi PLATFORMS WINDOWS)

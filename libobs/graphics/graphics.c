@@ -37,6 +37,11 @@
 
 static THREAD_LOCAL graphics_t *thread_graphics = NULL;
 
+/* Sole graphics instance (libobs creates exactly one). Lets pure-metadata
+ * accessors like gs_texture_get_obj work on threads that never entered the
+ * graphics context (e.g. the GPU encode thread reading a texture name). */
+static graphics_t *gs_singleton = NULL;
+
 static inline bool gs_obj_valid(const void *obj, const char *f, const char *name)
 {
 	if (!obj) {
@@ -222,6 +227,7 @@ int gs_create(graphics_t **pgraphics, const char *module, uint32_t adapter)
 	}
 
 	*pgraphics = graphics;
+	gs_singleton = graphics;
 	return errcode;
 
 error:
@@ -235,6 +241,9 @@ void gs_destroy(graphics_t *graphics)
 {
 	if (!ptr_valid(graphics, "gs_destroy"))
 		return;
+
+	if (gs_singleton == graphics)
+		gs_singleton = NULL;
 
 	while (thread_graphics)
 		gs_leave_context();
@@ -2492,9 +2501,11 @@ bool gs_texture_is_rect(const gs_texture_t *tex)
 
 void *gs_texture_get_obj(gs_texture_t *tex)
 {
-	graphics_t *graphics = thread_graphics;
+	graphics_t *graphics = thread_graphics ? thread_graphics : gs_singleton;
 
-	if (!gs_valid_p("gs_texture_get_obj", tex))
+	/* Metadata-only read: allowed off the graphics thread via the
+	 * singleton (see gs_singleton). */
+	if (!graphics || !tex)
 		return NULL;
 
 	return graphics->exports.gs_texture_get_obj(tex);

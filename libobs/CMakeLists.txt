@@ -256,6 +256,8 @@ if(OS_WINDOWS)
   include(cmake/os-windows.cmake)
 elseif(OS_MACOS)
   include(cmake/os-macos.cmake)
+elseif(OS_HARMONY)
+  include(cmake/os-harmony.cmake)
 elseif(OS_LINUX)
   include(cmake/os-linux.cmake)
 elseif(OS_FREEBSD OR OS_OPENBSD)
@@ -263,6 +265,16 @@ elseif(OS_FREEBSD OR OS_OPENBSD)
 endif()
 
 configure_file(obsconfig.h.in "${CMAKE_BINARY_DIR}/config/obsconfig.h" @ONLY)
+
+if(OS_HARMONY)
+  # libobs loads its .effect shaders at runtime through find_libobs_data_file()
+  # during obs_reset_video() — default, default_rect, opaque, solid, repeat and
+  # conversion. If they are not reachable as real files the video subsystem
+  # fails to initialise and nothing renders, so they must ship inside the HAP.
+  # They land in rawfile/libobs/ and ArkTS extracts them to a writable directory
+  # at first launch, because rawfile inside a HAP is not a filesystem path.
+  install_obs_data(libobs "${CMAKE_CURRENT_SOURCE_DIR}/data" "libobs")
+endif()
 
 target_include_directories(
   libobs

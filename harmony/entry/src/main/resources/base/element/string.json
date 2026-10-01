@@ -1,0 +1,40 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "OBS Studio frontend for HarmonyOS PC"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "OBS Studio main window: scene mixing, streaming and recording"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "OBS Studio"
+    },
+    {
+      "name": "reason_microphone",
+      "value": "OBS captures microphone audio as a source for your stream or recording."
+    },
+    {
+      "name": "reason_camera",
+      "value": "OBS captures your camera as a video source for your stream or recording."
+    },
+    {
+      "name": "reason_background",
+      "value": "Keeps an active broadcast running while the OBS window is minimized or in the background."
+    },
+    {
+      "name": "reason_screen_capture",
+      "value": "OBS captures the display or a window as a video source for your stream or recording."
+    },
+    {
+      "name": "reason_screen_recording",
+      "value": "Avoids the repeated system privacy prompt during long recording sessions. Requires AGC approval; OBS works without it."
+    },
+    {
+      "name": "reason_input_monitoring",
+      "value": "Enables global hotkeys (start/stop streaming, push-to-talk) while OBS is not focused. Requires AGC review; OBS works without it."
+    }
+  ]
+}

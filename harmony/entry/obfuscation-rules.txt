@@ -1,0 +1,4 @@
+# Obfuscation is disabled for the scaffold (see entry/build-profile.json5).
+# When enabling it for release builds, keep the NAPI-facing classes/methods:
+# -keep
+# ./src/main/ets/napi/obsBridge.ets

@@ -1,0 +1,8 @@
+{
+  "modelVersion": "5.0.0",
+  "name": "obs-studio-harmony",
+  "description": "ArkUI frontend shell for OBS Studio on HarmonyOS PC (2in1).",
+  "license": "GPL-2.0-or-later",
+  "dependencies": {},
+  "devDependencies": {}
+}

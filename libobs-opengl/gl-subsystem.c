@@ -144,7 +144,12 @@ static bool gl_init_extensions(struct gs_device *device)
 		return false;
 	}
 
+#ifndef __OHOS__
+	/* GLES 3.x samples cube maps seamlessly without an explicit enable and
+	 * rejects the enum with GL_INVALID_ENUM.
+	 */
 	gl_enable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+#endif
 
 	if (GLAD_GL_VERSION_4_3 || GLAD_GL_ARB_copy_image)
 		device->copy_type = COPY_TYPE_ARB;
@@ -504,6 +509,16 @@ static bool load_texture_sampler(gs_texture_t *tex, gs_samplerstate_t *ss)
 	samplerstate_addref(ss);
 
 	min_filter = ss->min_filter;
+#ifdef __OHOS__
+	/* Maleoon's GLES driver samples mipmap-incomplete textures as
+	 * (0,0,0,1) even when TEXTURE_MAX_LEVEL is 0 — which is the state of
+	 * every single-level dynamic/render texture in libobs (no code path
+	 * ever calls glGenerateMipmap for them). Desktop GL treats those
+	 * complete per spec; clamp the min filter to its non-mipmap
+	 * equivalent so sampling returns real texels. */
+	if (min_filter != GL_NEAREST && min_filter != GL_LINEAR)
+		strip_mipmap_filter(&min_filter);
+#endif
 	if (gs_texture_is_rect(tex))
 		strip_mipmap_filter(&min_filter);
 
@@ -944,19 +959,30 @@ void device_enable_framebuffer_srgb(gs_device_t *device, bool enable)
 {
 	UNUSED_PARAMETER(device);
 
+#ifdef __OHOS__
+	/* GL_FRAMEBUFFER_SRGB does not exist in GLES; the encoding is fixed by
+	 * the EGLConfig colour format chosen at context creation.
+	 */
+	UNUSED_PARAMETER(enable);
+#else
 	if (enable)
 		gl_enable(GL_FRAMEBUFFER_SRGB);
 	else
 		gl_disable(GL_FRAMEBUFFER_SRGB);
+#endif
 }
 
 bool device_framebuffer_srgb_enabled(gs_device_t *device)
 {
 	UNUSED_PARAMETER(device);
 
+#ifdef __OHOS__
+	return false;
+#else
 	const GLboolean enabled = glIsEnabled(GL_FRAMEBUFFER_SRGB);
 	gl_success("glIsEnabled");
 	return enabled == GL_TRUE;
+#endif
 }
 
 void device_copy_texture_region(gs_device_t *device, gs_texture_t *dst, uint32_t dst_x, uint32_t dst_y,
@@ -1149,6 +1175,7 @@ void device_draw(gs_device_t *device, enum gs_draw_mode draw_mode, uint32_t star
 		if (num_verts == 0)
 			num_verts = (uint32_t)device->cur_vertex_buffer->num;
 		glDrawArrays(topology, start_vert, num_verts);
+
 		if (!gl_success("glDrawArrays"))
 			goto fail;
 	}

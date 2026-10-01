@@ -106,10 +106,17 @@ static bool can_stage(struct gs_stage_surface *dst, struct gs_texture_2d *src)
 	return true;
 }
 
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__OHOS__)
 
 /* Apparently for mac, PBOs won't do an asynchronous transfer unless you use
- * FBOs along with glReadPixels, which is really dumb. */
+ * FBOs along with glReadPixels, which is really dumb.
+ *
+ * HarmonyOS takes this path for a different reason: GLES has no glGetTexImage
+ * at all, so attaching the texture to an FBO and reading through
+ * glReadPixels is the only way to stage it back to CPU memory. GLES 3.0
+ * honours a bound GL_PIXEL_PACK_BUFFER as the glReadPixels target, so the
+ * existing PBO plumbing works unchanged.
+ */
 void device_stage_texture(gs_device_t *device, gs_stagesurf_t *dst, gs_texture_t *src)
 {
 	struct gs_texture_2d *tex2d = (struct gs_texture_2d *)src;

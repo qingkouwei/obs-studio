@@ -19,6 +19,14 @@ option(ENABLE_FRONTEND "Enable building with UI (requires Qt)" ON)
 option(ENABLE_SCRIPTING "Enable scripting support" ON)
 option(ENABLE_HEVC "Enable HEVC encoders" ON)
 
+# The Qt Widgets frontend is not built for HarmonyOS. Its replacement lives in
+# harmony/ as an ArkUI application that drives libobs through Node-API, and it
+# is built by hvigor rather than by this CMake project.
+if(OS_HARMONY)
+  set(ENABLE_FRONTEND OFF)
+  set(ENABLE_SCRIPTING OFF)
+endif()
+
 add_subdirectory(libobs)
 if(OS_WINDOWS)
   add_subdirectory(libobs-d3d11)
@@ -30,8 +38,10 @@ if(OS_MACOS)
 endif()
 add_subdirectory(plugins)
 
-add_subdirectory(test/test-input)
+if(NOT OS_HARMONY)
+  add_subdirectory(test/test-input)
 
-add_subdirectory(frontend)
+  add_subdirectory(frontend)
+endif()
 
 message_configuration()

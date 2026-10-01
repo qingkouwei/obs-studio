@@ -1,0 +1,11 @@
+{
+  "name": "entry",
+  "version": "0.1.0",
+  "description": "OBS Studio ArkUI entry module (HarmonyOS PC / 2in1).",
+  "main": "",
+  "author": "obsproject",
+  "license": "GPL-2.0-or-later",
+  "dependencies": {
+    "libobs_bridge.so": "file:./src/main/cpp/types/libobs_bridge"
+  }
+}

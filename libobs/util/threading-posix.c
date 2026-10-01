@@ -261,7 +261,11 @@ void os_set_thread_name(const char *name)
 	pthread_setname_np(name);
 #elif defined(__FreeBSD__)
 	pthread_set_name_np(pthread_self(), name);
-#elif defined(__GLIBC__) && !defined(__MINGW32__)
+#elif (defined(__GLIBC__) || defined(__OHOS__)) && !defined(__MINGW32__)
+	/* musl (which HarmonyOS uses) declares the same two-argument
+	 * pthread_setname_np as glibc and enforces the same 16-byte limit
+	 * including the terminator, so the truncation logic is identical.
+	 */
 	if (strlen(name) <= 15) {
 		pthread_setname_np(pthread_self(), name);
 	} else {

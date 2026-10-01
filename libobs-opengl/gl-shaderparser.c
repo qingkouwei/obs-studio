@@ -228,10 +228,18 @@ static void gl_write_struct(struct gl_shader_parser *glsp, struct shader_struct 
 
 static void gl_write_interface_block(struct gl_shader_parser *glsp)
 {
+#ifdef __OHOS__
+	/* GLSL ES 3.0 declares gl_PerVertex implicitly and rejects a
+	 * redeclaration with an explicit storage qualifier
+	 * ("Invalid qualifier 'out' for interface block"). gl_Position is
+	 * available without any declaration. */
+	(void)glsp;
+#else
 	if (glsp->type == GS_SHADER_VERTEX) {
 		dstr_cat(&glsp->gl_string, "out gl_PerVertex {\n"
 					   "\tvec4 gl_Position;\n};\n\n");
 	}
+#endif
 }
 
 static inline void gl_write_structs(struct gl_shader_parser *glsp)
@@ -727,22 +735,48 @@ static bool gl_shader_buildstring(struct gl_shader_parser *glsp)
 		return false;
 	}
 
+#ifdef __OHOS__
+	/* HarmonyOS exposes OpenGL ES only. The GLSL emitted below uses nothing
+	 * beyond the ES 3.0 feature set (textureSize, textureLod, sampler3D),
+	 * but ES requires an explicit default precision for float/int/samplers,
+	 * which desktop GLSL 3.30 does not.
+	 */
+	dstr_copy(&glsp->gl_string, "#version 300 es\n\n");
+	dstr_cat(&glsp->gl_string, "precision highp float;\n");
+	dstr_cat(&glsp->gl_string, "precision highp int;\n");
+	dstr_cat(&glsp->gl_string, "precision highp sampler2D;\n");
+	dstr_cat(&glsp->gl_string, "precision highp sampler3D;\n");
+	dstr_cat(&glsp->gl_string, "precision highp samplerCube;\n\n");
+#else
 	dstr_copy(&glsp->gl_string, "#version 330\n\n");
+#endif
 	dstr_cat(&glsp->gl_string, "const bool obs_glsl_compile = true;\n\n");
 	dstr_cat(&glsp->gl_string, "vec4 obs_load_2d(sampler2D s, ivec3 p_lod)\n");
 	dstr_cat(&glsp->gl_string, "{\n");
 	dstr_cat(&glsp->gl_string, "\tint lod = p_lod.z;\n");
+#ifdef __OHOS__
+	/* textureSize returns ivec2/ivec3 in GLSL ES — an implicit vector
+	 * conversion to vec2/vec3 is rejected; convert explicitly. */
+	dstr_cat(&glsp->gl_string, "\tvec2 size = vec2(textureSize(s, lod));\n");
+#else
 	dstr_cat(&glsp->gl_string, "\tvec2 size = textureSize(s, lod);\n");
+#endif
 	dstr_cat(&glsp->gl_string, "\tvec2 p = (vec2(p_lod.xy) + 0.5) / size;\n");
-	dstr_cat(&glsp->gl_string, "\tvec4 color = textureLod(s, p, lod);\n");
+	/* float(lod): GLSL ES forbids the implicit int->float argument
+	 * conversion that desktop GLSL still allows for legacy reasons. */
+	dstr_cat(&glsp->gl_string, "\tvec4 color = textureLod(s, p, float(lod));\n");
 	dstr_cat(&glsp->gl_string, "\treturn color;\n");
 	dstr_cat(&glsp->gl_string, "}\n\n");
 	dstr_cat(&glsp->gl_string, "vec4 obs_load_3d(sampler3D s, ivec4 p_lod)\n");
 	dstr_cat(&glsp->gl_string, "{\n");
 	dstr_cat(&glsp->gl_string, "\tint lod = p_lod.w;\n");
+#ifdef __OHOS__
+	dstr_cat(&glsp->gl_string, "\tvec3 size = vec3(textureSize(s, lod));\n");
+#else
 	dstr_cat(&glsp->gl_string, "\tvec3 size = textureSize(s, lod);\n");
+#endif
 	dstr_cat(&glsp->gl_string, "\tvec3 p = (vec3(p_lod.xyz) + 0.5) / size;\n");
-	dstr_cat(&glsp->gl_string, "\tvec4 color = textureLod(s, p, lod);\n");
+	dstr_cat(&glsp->gl_string, "\tvec4 color = textureLod(s, p, float(lod));\n");
 	dstr_cat(&glsp->gl_string, "\treturn color;\n");
 	dstr_cat(&glsp->gl_string, "}\n\n");
 	gl_write_params(glsp);

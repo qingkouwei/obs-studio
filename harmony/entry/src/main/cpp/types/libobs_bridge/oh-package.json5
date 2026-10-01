@@ -1,0 +1,6 @@
+{
+  "name": "libobs_bridge.so",
+  "types": "./index.d.ts",
+  "version": "0.1.0",
+  "description": "NAPI bridge between the ArkUI frontend and the libobs core (shell-only until HAVE_LIBOBS)."
+}

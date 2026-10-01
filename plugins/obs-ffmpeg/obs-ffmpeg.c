@@ -9,7 +9,12 @@
 #include <dxgi.h>
 #endif
 
-#if !defined(_WIN32) && !defined(__APPLE__)
+/* Positive test for libva, not a negative test for the desktop platforms.
+ * HarmonyOS is neither _WIN32 nor __APPLE__ but has no libva, so excluding it
+ * explicitly is required — otherwise vaapi-utils.h pulls in <va/va.h> and the
+ * VAAPI encoders are registered against hardware that cannot exist.
+ */
+#if !defined(_WIN32) && !defined(__APPLE__) && !defined(__OHOS__)
 #include "vaapi-utils.h"
 
 #define LIBAVUTIL_VAAPI_AVAILABLE

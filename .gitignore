@@ -8,6 +8,7 @@
 !/deps
 !/docs
 !/frontend
+!/harmony
 !/libobs*
 !/plugins
 !/shared
@@ -49,3 +50,14 @@ build-aux/flatpak-github-action-modified-*
 
 # Exclude CMake build number cache
 /cmake/.CMakeBuildNumber
+
+# HarmonyOS: the ArkUI project source is tracked, its build outputs are not.
+# harmony/entry/libs/{abi}/ receives the .so files staged by the native CMake
+# build, so it is generated rather than authored.
+/harmony/.hvigor
+/harmony/build
+/harmony/entry/.cxx
+/harmony/entry/build
+/harmony/entry/libs
+/harmony/**/oh_modules
+/harmony/**/.preview
