@@ -113,9 +113,9 @@ tap_text "开始共享"
 sleep "$WAIT"
 
 if [ "$STREAM" = "1" ]; then
-    echo "[5a] streaming: start → 10s → stop"
+    echo "[5a] streaming: start → ${STREAM_SECS:-10}s → stop"
     tap_text "Start Streaming"
-    sleep 10
+    sleep "${STREAM_SECS:-10}"
     shell "hilog -x | grep -iE 'streaming started|rtmp|connect' | grep obs_bridge | tail -6"
     wait_tap "Stop Streaming" 5
     sleep 3
