@@ -14,13 +14,16 @@ import { TransportBar } from '../components/TransportBar';
  * Version stamp for the rawfile extraction cache. Bumping the bundle's
  * versionCode invalidates a previously extracted asset tree, so an app upgrade
  * that ships new .effect shaders or locale files cannot be shadowed by stale
- * copies left in filesDir.
+ * copies left in filesDir. ASSET_STAMP covers dev-time rawfile changes that
+ * do not bump versionCode (e.g. staging a plugin's data/ directory).
  */
+const ASSET_STAMP = 'obs-plugins-data-v2';
+
 function resolveBundleVersion(): string {
   try {
     const info = bundleManager.getBundleInfoForSelfSync(
       bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION);
-    return `${info.versionCode}`;
+    return `${info.versionCode}-${ASSET_STAMP}`;
   } catch (err) {
     const e = err as BusinessError;
     Logger.warn(`could not read bundle versionCode (${e.code}); extracting unconditionally`);

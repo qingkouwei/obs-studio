@@ -1121,7 +1121,16 @@ napi_value NativeAddFilter(napi_env env, napi_callback_info info)
     }
     // Filters are private sources; a public obs_source_create rejects
     // OBS_SOURCE_TYPE_FILTER with "can't be created publically".
-    obs_source_t *filter = obs_source_create_private(filterTypeId.c_str(), filterTypeId.c_str(), nullptr);
+    // Pass the type's DEFAULT settings, not nullptr: color_filter's
+    // opacity comes from obs_data_get_int(SETTING_OPACITY) and a missing
+    // key reads as 0 — a zero row in the matrix multiplies every pixel to
+    // black. obs_get_source_defaults runs the plugin's get_defaults hook
+    // (opacity=100 → 1.0), exactly what the Qt frontend does.
+    obs_data_t *defaults = obs_get_source_defaults(filterTypeId.c_str());
+    obs_source_t *filter = obs_source_create_private(filterTypeId.c_str(), filterTypeId.c_str(), defaults);
+    if (defaults) {
+        obs_data_release(defaults);
+    }
     if (filter == nullptr) {
         return CreateBool(env, false); // type not registered
     }

@@ -182,6 +182,18 @@ if [ -d "$BUILD_DIR/rundir/Release/share/obs" ]; then
           "$REPO_ROOT/harmony/entry/src/main/resources/rawfile/"
 fi
 
+# 4b. Plugin data (effect shaders, locale) — cmake's rundir does not assemble
+# share/obs on OHOS, so sync each staged plugin's source data/ directory into
+# the rawfile tree the bridge expects (dataDir/obs-plugins/<name>).
+RF="$REPO_ROOT/harmony/entry/src/main/resources/rawfile/obs-plugins"
+for p in obs-filters obs-transitions obs-ffmpeg obs-x264 obs-outputs image-source rtmp-services; do
+    if [ -d "$REPO_ROOT/plugins/$p/data" ]; then
+        mkdir -p "$RF/$p"
+        cp -R "$REPO_ROOT/plugins/$p/data/." "$RF/$p/"
+    fi
+done
+log "Plugin data synced into rawfile (obs-plugins/*)"
+
 # ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
