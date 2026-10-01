@@ -98,6 +98,13 @@
           "abilities": ["EntryAbility"],
           "when": "inuse"
         }
+      },
+      {
+        // normal / system_grant (API 21+): lets the screen time out to OFF
+        // without entering the lock screen, so AVScreenCapture keeps
+        // producing frames — the official mechanism for "record while the
+        // display is off". Fixes the port-journey "息屏继续录" open item.
+        "name": "ohos.permission.TIMEOUT_SCREENOFF_DISABLE_LOCK"
       }
     ],
     "abilities": [
