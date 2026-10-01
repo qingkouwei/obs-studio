@@ -37,7 +37,7 @@
 2. **相机源**：harmony-camera 插件在，缺 Camera Kit 会话 → libobs texture 的 UI 流程与权限。
 3. **色准**：8bit sRGB canvas 双重编码（GS_BGRA 退 RGBA 的连带项）→ 线性 canvas 或 sRGB-aware 路径。
 4. **HEVC/AV1 硬编**：OH_VideoEncoder 支持（HDR Vivid 文档证实 HEVC Main10 路径），harmony-vcodec 只做了 H.264。
-5. **长时任务规范化**：录屏/直播属于官方支持的长时任务类型，需 ContinuousTaskRequest（`ohos.permission.KEEP_BACKGROUND_RUNNING`）+ AVSession 组合，替代目前"裸跑后台"的验证态；含"用户主动停止后不得立即重申请"等管控原则合规。
+5. ~~长时任务规范化~~ —— **已闭环（10-02）**：audioRecording continuous task 接入（LongRunningTask.ets + backgroundModes 声明），息屏录制实测 544s 成片。见 journey §5.6。
 6. **设置面板/配置持久化**：profile 级设置（分辨率/码率/键率）UI 化。
 7. **rtmp-services 远程更新**：mbedTLS 证书链问题（可修，非阻塞）。
 8. **虚拟摄像头输出**：需调研鸿蒙侧等价机制（系统是否有虚拟视频输入 API；若无，考虑分布式/投屏形态替代叙事）。
