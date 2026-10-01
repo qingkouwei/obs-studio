@@ -367,7 +367,7 @@ rtmp_pageurl / rtmp_swfverify / rtmp_tcurl
 1. **窗口枚举 API 缺失** —— `native_avscreen_capture.h` / `_base.h` 中没有 `OH_AVScreenCapture_WindowInfo` / `GetWindowList`；`PresentPicker` 的 `OnUserSelected` 只回传采集类型与 display ID，**拿不到所选窗口的 mission ID**。因此窗口采集源只能接受手工输入的 mission ID，无法提供下拉列表。
 2. **编码器 SEI 注入缺失** —— `native_avcodec_base.h` 无 SEI 相关 `OH_MD_KEY_*`，`get_sei_data` 未实现。影响：部分平台的服务端元数据（如 OBS 的 BPM）无法透传。
 3. **显示分辨率查询缺失** —— 无 `native_display_manager` 头，采集分辨率只能作为用户设置项，默认 1080p。
-4. ~~**系统音频内录的 PC 支持未验证**~~ —— **已在真机确认可用**，见 §8.2。官方文档写 `SystemCapability.Multimedia.Audio.PlaybackCapture` 支持 Phone/Tablet/TV，PC/2in1 需运行时探测；实测 API 26 手机上该 syscap 为 `true`。**PC/2in1 上仍需复测**（同一探测方法，见 §8.2）。桥接层已暴露 `nativeCanCaptureSystemAudio()`，UI 必须如实呈现探测结果而非假设可用。
+4. ~~**系统音频内录的 PC 支持未验证**~~ —— **已在真机确认可用**，见 §8.2。官方文档写 `SystemCapability.Multimedia.Audio.PlaybackCapture` 支持 Phone/Tablet/TV，PC/2in1 需运行时探测；实测 API 26 手机上该 syscap 为 `true`。验证机 MatePad Edge 即跑在 PC/2in1 模式，内录已实测可用。桥接层已暴露 `nativeCanCaptureSystemAudio()`，UI 必须如实呈现探测结果而非假设可用。
 5. **`show_hidden_windows` 无法实现** —— 唯一钩子 `SkipPrivacyMode(windowIDs,...)` 需要应用自有窗口 ID。
 6. **零拷贝采集路径未启用** —— `OH_NativeImage` + `GL_TEXTURE_EXTERNAL_OES` 是正确方向，但 GLES 外部纹理需要 GLSL 里 `#extension GL_OES_EGL_image_external`，而 libobs 的 shader parser 不会输出该扩展声明。当前走 CPU 回读（`OH_NativeBuffer_MapAndGetConfig`）。
 

@@ -1,6 +1,6 @@
 # OBS Studio → HarmonyOS 移植全程纪实
 
-> 本文是面向技术写作的**过程纪实**：每个里程碑、每个 bug 都按「现象 → 排查过程 → 根因 → 修复 → 可复用的教训」记录，事实全部来自真机（HUAWEI MatePad，HarmonyOS 7.0.0.109，Maleoon 916B GPU，PC/2in1 模式）实测，非纸面推演。
+> 本文是面向技术写作的**过程纪实**：每个里程碑、每个 bug 都按「现象 → 排查过程 → 根因 → 修复 → 可复用的教训」记录，事实全部来自真机（HUAWEI MatePad Edge——Pad/PC 双形态设备，HarmonyOS 7.0.0.109，Maleoon 916B GPU，PC/2in1 模式）实测，非纸面推演。
 > 与 `harmonyos-session-log.md`（工程交接文档）的分工：那边记"状态与契约"，这边记"故事与因果"。
 
 ## 0. 项目速览
@@ -288,7 +288,9 @@ duration 10.17s   bitrate 1.34 Mbps
 | 10-01 下午 | 渲染管线打通（通道绑定）；采集三层修复（Init/Picker/取址）；EGL 窗口引用修复；viewport 修复；**预览黑屏根因（RECTANGLE 撞车）定位并修复，真实桌面画面显示** |
 | 10-01 晚间 | **录制闭环打通**：mp4_output 替换 ffmpeg_muxer；编码线程共享 EGL context；NV12→RGB 色彩修复；**产出可播放 mp4（h264 1080p60 + aac，10.2s，ffprobe+抽帧双验证）**；**RTMP 推流打通**：service 生命周期修复，mediamtx 收流 + HLS 回拉抽帧验证真实画面，3.7 分钟 13544 帧零中断 |
 | 10-01 深夜 | 后台录制实测通过（221s 成片、抽帧真实）；**全部诊断探针清理**（7 文件）后全链路冒烟复验通过；git 基线提交并推送 fork（harmonyos-port 分支） |
-| 下一步 | draft PR 台账 + 小颗粒 PR 拆分；息屏录制场景；色彩精调；窗口/相机源；真 PC 复测 |
+| 下一步 | draft PR 台账 + 小颗粒 PR 拆分；息屏录制场景；色彩精调；窗口/相机源 |
+
+> 说明：验证机 MatePad Edge 是 Pad/PC 双形态设备，PC 模式即真 PC 形态，此前所有实测（预览/录制/推流/Picker 交互）均在 PC/2in1 模式下完成，不存在"另找真 PC 复测"的遗留项。
 
 ## 8. 已知遗留
 
@@ -296,7 +298,7 @@ duration 10.17s   bitrate 1.34 Mbps
 - 插件加载清单的工程化（SELinux/linker-ns 约束下的体面方案）
 - 诊断探针全链清理（device_draw/attrbuf/uniform/shader dump/canvas 采样/帧计数）
 - 窗口采集、相机源的 Picker/权限流程
-- PC/2in1 行为需在真 PC 复测；AGC 受限权限审批材料
+- AGC 受限权限审批材料（CUSTOM_SCREEN_RECORDING）
 - rtmp-services 远程更新失败（mbedTLS 证书链，非阻塞，本地 package 兜底）
 
 ## 9. 上游 PR 候选（按可合入性排序）
