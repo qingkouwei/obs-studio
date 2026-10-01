@@ -69,6 +69,13 @@ export interface NativeStreamStats {
 /** Callback pushed from the native stats thread via a threadsafe function. */
 export type NativeStatsCallback = (stats: NativeStreamStats) => void;
 
+/** One filter attached to a source, as reported by nativeGetFilters(). */
+export interface NativeFilterEntry {
+  name: string;
+  typeId: string;
+  enabled: boolean;
+}
+
 export interface ObsBridgeNative {
   /** Start libobs (when linked) and the HarmonyOS audio capture tracks. */
   /**
@@ -97,6 +104,15 @@ export interface ObsBridgeNative {
   nativeAddSource(sceneId: string, typeId: string, name: string, settingsJson: string): string;
   nativeRemoveSource(id: string): boolean;
   nativeSetSourceVisible(id: string, visible: boolean): boolean;
+  /** Bind the program channel (channel 0) to another scene — the "scene cut". */
+  nativeSelectScene(id: string): boolean;
+
+  /** Filter type ids actually registered by the staged obs-filters plugin. */
+  nativeGetFilterTypes(): string[];
+  nativeGetFilters(sourceId: string): NativeFilterEntry[];
+  nativeAddFilter(sourceId: string, filterTypeId: string): boolean;
+  nativeRemoveFilter(sourceId: string, filterName: string): boolean;
+  nativeSetFilterEnabled(sourceId: string, filterName: string, enabled: boolean): boolean;
 
   nativeGetAudioTracks(): NativeAudioTrack[];
   nativeSetMute(trackId: string, muted: boolean): boolean;

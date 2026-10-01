@@ -108,12 +108,14 @@ export struct SourceList {
             $r('app.color.obs_panel_border') : Color.Transparent)
             .onClick(() => {
               this.model.selectedSourceId = source.id;
+              ObsController.refreshFilters();
             })
           }
         }, (source: SourceItemModel) => source.id)
       }
       .width('100%')
       .layoutWeight(1)
+      .constraintSize({ minHeight: 46 })
       .scrollBar(BarState.Auto)
 
       if (this.model.selectedSceneId === '') {
@@ -126,7 +128,7 @@ export struct SourceList {
       }
     }
     .width('100%')
-    .height('100%')
+    .layoutWeight(1)
     .padding(8)
     .alignItems(HorizontalAlign.Start)
   }

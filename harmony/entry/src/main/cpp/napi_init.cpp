@@ -68,6 +68,13 @@ napi_value Init(napi_env env, napi_value exports)
         DECLARE_NAPI_FUNCTION("nativeAddSource", NativeAddSource),
         DECLARE_NAPI_FUNCTION("nativeRemoveSource", NativeRemoveSource),
         DECLARE_NAPI_FUNCTION("nativeSetSourceVisible", NativeSetSourceVisible),
+        DECLARE_NAPI_FUNCTION("nativeSelectScene", NativeSelectScene),
+        // Filters
+        DECLARE_NAPI_FUNCTION("nativeGetFilterTypes", NativeGetFilterTypes),
+        DECLARE_NAPI_FUNCTION("nativeGetFilters", NativeGetFilters),
+        DECLARE_NAPI_FUNCTION("nativeAddFilter", NativeAddFilter),
+        DECLARE_NAPI_FUNCTION("nativeRemoveFilter", NativeRemoveFilter),
+        DECLARE_NAPI_FUNCTION("nativeSetFilterEnabled", NativeSetFilterEnabled),
         // Audio
         DECLARE_NAPI_FUNCTION("nativeGetAudioTracks", NativeGetAudioTracks),
         DECLARE_NAPI_FUNCTION("nativeSetMute", NativeSetMute),

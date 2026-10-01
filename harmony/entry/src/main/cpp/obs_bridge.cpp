@@ -1030,6 +1030,210 @@ napi_value NativeSetSourceVisible(napi_env env, napi_callback_info info)
 #endif
 }
 
+/* Switch the program channel (channel 0) to another registered scene.
+ * This is the "cut" the desktop frontend performs when you click a scene in
+ * the scene list; without it every created scene stays bound until the next
+ * create (see NativeCreateScene). */
+napi_value NativeSelectScene(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id;
+    if (argc < 1 || !GetStringArg(env, args[0], id)) {
+        return ThrowError(env, "nativeSelectScene(id): argument must be a string");
+    }
+#ifndef HAVE_LIBOBS
+    (void)id;
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    auto it = g_scenes.find(id);
+    if (it == g_scenes.end()) {
+        return CreateBool(env, false);
+    }
+    obs_set_output_source(0, obs_scene_get_source(it->second));
+    return CreateBool(env, true);
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// Filters (HAVE_LIBOBS) — thin wrappers over obs_source_create for filter
+// types registered by obs-filters, attached with obs_source_filter_add.
+// The ArkTS panel exposes add/remove/enable/list; settings stay at defaults.
+// ---------------------------------------------------------------------------
+
+napi_value NativeGetFilterTypes(napi_env env, napi_callback_info /*info*/)
+{
+    napi_value array = nullptr;
+    napi_create_array(env, &array);
+#ifndef HAVE_LIBOBS
+    OH_LOG_DEBUG(LOG_APP, "nativeGetFilterTypes: shell-only, empty");
+#else
+    /* The subset of obs-filters types that are meaningful and GPU-cheap on
+     * mobile GLES. Ids are the exact obs_source_info.id strings registered by
+     * obs-filters (note: colour correction registers as "color_filter", not
+     * "color_correction_filter"). Filters are private sources — libobs rejects
+     * a public obs_source_create for OBS_SOURCE_TYPE_FILTER, so probing and
+     * creation both go through obs_source_create_private. */
+    static const char *const kCandidateFilters[] = {
+        "color_filter", "scale_filter", "crop_filter", "sharpness_filter",
+    };
+    uint32_t index = 0;
+    for (const char *fid : kCandidateFilters) {
+        /* Cheap existence probe: create_private returns nullptr when the type
+         * id was never registered (plugin missing / failed to load), so the
+         * panel's candidate list degrades gracefully. */
+        obs_source_t *probe = obs_source_create_private(fid, "__probe__", nullptr);
+        if (probe != nullptr) {
+            obs_source_release(probe);
+            napi_value item = nullptr;
+            napi_create_string_utf8(env, fid, NAPI_AUTO_LENGTH, &item);
+            napi_set_element(env, array, index++, item);
+        }
+    }
+#endif
+    return array;
+}
+
+napi_value NativeAddFilter(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string sourceId; // scene item id (stringified int64)
+    std::string filterTypeId;
+    if (argc < 2 || !GetStringArg(env, args[0], sourceId) || !GetStringArg(env, args[1], filterTypeId)) {
+        return ThrowError(env, "nativeAddFilter(sourceId, filterTypeId): bad arguments");
+    }
+#ifndef HAVE_LIBOBS
+    (void)sourceId; (void)filterTypeId;
+    return CreateBool(env, false);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(sourceId.c_str(), nullptr, 10));
+    if (item == nullptr) {
+        return CreateBool(env, false);
+    }
+    obs_source_t *source = obs_sceneitem_get_source(item);
+    if (source == nullptr) {
+        return CreateBool(env, false);
+    }
+    // Filters are private sources; a public obs_source_create rejects
+    // OBS_SOURCE_TYPE_FILTER with "can't be created publically".
+    obs_source_t *filter = obs_source_create_private(filterTypeId.c_str(), filterTypeId.c_str(), nullptr);
+    if (filter == nullptr) {
+        return CreateBool(env, false); // type not registered
+    }
+    obs_source_filter_add(source, filter);
+    obs_source_release(filter); // source holds the ref now
+    return CreateBool(env, true);
+#endif
+}
+
+napi_value NativeRemoveFilter(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string sourceId, filterName;
+    if (argc < 2 || !GetStringArg(env, args[0], sourceId) || !GetStringArg(env, args[1], filterName)) {
+        return ThrowError(env, "nativeRemoveFilter(sourceId, filterName): bad arguments");
+    }
+#ifndef HAVE_LIBOBS
+    (void)sourceId; (void)filterName;
+    return CreateBool(env, false);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(sourceId.c_str(), nullptr, 10));
+    if (item == nullptr) {
+        return CreateBool(env, false);
+    }
+    obs_source_t *source = obs_sceneitem_get_source(item);
+    obs_source_t *filter = obs_source_get_filter_by_name(source, filterName.c_str());
+    if (filter == nullptr) {
+        return CreateBool(env, false);
+    }
+    obs_source_filter_remove(source, filter);
+    obs_source_release(filter);
+    return CreateBool(env, true);
+#endif
+}
+
+napi_value NativeSetFilterEnabled(napi_env env, napi_callback_info info)
+{
+    size_t argc = 3;
+    napi_value args[3] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string sourceId, filterName;
+    bool enabled = true;
+    napi_get_value_bool(env, args[2], &enabled);
+    if (argc < 3 || !GetStringArg(env, args[0], sourceId) || !GetStringArg(env, args[1], filterName)) {
+        return ThrowError(env, "nativeSetFilterEnabled(sourceId, filterName, enabled): bad arguments");
+    }
+#ifndef HAVE_LIBOBS
+    (void)sourceId; (void)filterName; (void)enabled;
+    return CreateBool(env, false);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(sourceId.c_str(), nullptr, 10));
+    if (item == nullptr) {
+        return CreateBool(env, false);
+    }
+    obs_source_t *source = obs_sceneitem_get_source(item);
+    obs_source_t *filter = obs_source_get_filter_by_name(source, filterName.c_str());
+    if (filter == nullptr) {
+        return CreateBool(env, false);
+    }
+    obs_source_set_enabled(filter, enabled);
+    obs_source_release(filter);
+    return CreateBool(env, true);
+#endif
+}
+
+struct FilterEnumCtx {
+    napi_env env;
+    napi_value array;
+    uint32_t index = 0;
+};
+
+void FilterCollectCallback(obs_source_t * /*parent*/, obs_source_t *filter, void *param)
+{
+    FilterEnumCtx *ctx = static_cast<FilterEnumCtx *>(param);
+    napi_value obj = nullptr;
+    napi_create_object(ctx->env, &obj);
+    SetProperty(ctx->env, obj, "name", CreateString(ctx->env, obs_source_get_name(filter)));
+    SetProperty(ctx->env, obj, "typeId",
+                CreateString(ctx->env, obs_source_get_unversioned_id(filter)));
+    SetProperty(ctx->env, obj, "enabled", CreateBool(ctx->env, obs_source_enabled(filter)));
+    napi_set_element(ctx->env, ctx->array, ctx->index++, obj);
+}
+
+napi_value NativeGetFilters(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string sourceId;
+    if (argc < 1 || !GetStringArg(env, args[0], sourceId)) {
+        return ThrowError(env, "nativeGetFilters(sourceId): argument must be a string");
+    }
+    napi_value array = nullptr;
+    napi_create_array(env, &array);
+#ifndef HAVE_LIBOBS
+    (void)sourceId;
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(sourceId.c_str(), nullptr, 10));
+    if (item != nullptr) {
+        obs_source_t *source = obs_sceneitem_get_source(item);
+        FilterEnumCtx ctx{env, array, 0};
+        obs_source_enum_filters(source, FilterCollectCallback, &ctx);
+    }
+#endif
+    return array;
+}
+
 napi_value NativeGetAudioTracks(napi_env env, napi_callback_info /*info*/)
 {
     napi_value array = nullptr;

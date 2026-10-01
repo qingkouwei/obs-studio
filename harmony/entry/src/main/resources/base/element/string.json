@@ -215,6 +215,34 @@
     {
       "name": "st_capture_failed",
       "value": "采集失败"
+    },
+    {
+      "name": "filters",
+      "value": "滤镜"
+    },
+    {
+      "name": "notice_add_filter_fail",
+      "value": "无法添加滤镜“{0}”。"
+    },
+    {
+      "name": "filter_color",
+      "value": "色彩校正"
+    },
+    {
+      "name": "filter_flip",
+      "value": "翻转"
+    },
+    {
+      "name": "filter_scale",
+      "value": "缩放过滤"
+    },
+    {
+      "name": "filter_crop",
+      "value": "裁剪"
+    },
+    {
+      "name": "filter_sharpness",
+      "value": "锐化"
     }
   ]
 }

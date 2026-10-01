@@ -1,6 +1,7 @@
 import obsBridgeNative from 'libobs_bridge.so';
 import {
   NativeAudioTrack,
+  NativeFilterEntry,
   NativeOutputLevel,
   NativeSceneEntry,
   NativeSourceEntry,
@@ -140,6 +141,60 @@ export class ObsBridge {
       return obsBridgeNative.nativeSetSourceVisible(id, visible);
     } catch (err) {
       Logger.error('nativeSetSourceVisible failed', Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  static selectScene(id: string): boolean {
+    try {
+      return obsBridgeNative.nativeSelectScene(id);
+    } catch (err) {
+      Logger.error('nativeSelectScene failed', Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  static getFilterTypes(): string[] {
+    try {
+      return obsBridgeNative.nativeGetFilterTypes();
+    } catch (err) {
+      Logger.error('nativeGetFilterTypes failed', Logger.asError(err as Object));
+      return [];
+    }
+  }
+
+  static getFilters(sourceId: string): NativeFilterEntry[] {
+    try {
+      return obsBridgeNative.nativeGetFilters(sourceId);
+    } catch (err) {
+      Logger.error('nativeGetFilters failed', Logger.asError(err as Object));
+      return [];
+    }
+  }
+
+  static addFilter(sourceId: string, filterTypeId: string): boolean {
+    try {
+      return obsBridgeNative.nativeAddFilter(sourceId, filterTypeId);
+    } catch (err) {
+      Logger.error(`nativeAddFilter(${filterTypeId}) failed`, Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  static removeFilter(sourceId: string, filterName: string): boolean {
+    try {
+      return obsBridgeNative.nativeRemoveFilter(sourceId, filterName);
+    } catch (err) {
+      Logger.error('nativeRemoveFilter failed', Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  static setFilterEnabled(sourceId: string, filterName: string, enabled: boolean): boolean {
+    try {
+      return obsBridgeNative.nativeSetFilterEnabled(sourceId, filterName, enabled);
+    } catch (err) {
+      Logger.error('nativeSetFilterEnabled failed', Logger.asError(err as Object));
       return false;
     }
   }

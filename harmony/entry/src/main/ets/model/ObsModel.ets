@@ -1,5 +1,5 @@
-import { NativeAudioTrack, NativeOutputLevel, NativeSceneEntry, NativeSourceEntry,
-  NativeStreamStats } from 'libobs_bridge.so';
+import { NativeAudioTrack, NativeFilterEntry, NativeOutputLevel, NativeSceneEntry,
+  NativeSourceEntry, NativeStreamStats } from 'libobs_bridge.so';
 import { ObsBridge, SystemAudioCapability } from '../napi/obsBridge';
 import { Logger } from '../common/Logger';
 
@@ -63,6 +63,19 @@ export class SourceItemModel {
 }
 
 @ObservedV2
+export class FilterItemModel {
+  @Trace name: string = '';
+  @Trace typeId: string = '';
+  @Trace enabled: boolean = true;
+
+  constructor(name: string, typeId: string, enabled: boolean) {
+    this.name = name;
+    this.typeId = typeId;
+    this.enabled = enabled;
+  }
+}
+
+@ObservedV2
 export class AudioTrackModel {
   @Trace id: string = '';
   @Trace name: string = '';
@@ -120,6 +133,11 @@ export class ObsAppState {
   @Trace selectedSceneId: string = '';
   @Trace sources: SourceItemModel[] = [];
   @Trace selectedSourceId: string = '';
+
+  /** Filters of the currently selected source (refreshed on selection change). */
+  @Trace filters: FilterItemModel[] = [];
+  /** Filter type ids the staged obs-filters plugin actually registered. */
+  @Trace filterTypes: string[] = [];
 
   @Trace audioTracks: AudioTrackModel[] = [];
   @Trace stats: StreamStatsModel = new StreamStatsModel();
@@ -252,6 +270,66 @@ export class ObsController {
     model.sources = sources;
     if (!sources.some((source: SourceItemModel): boolean => source.id === model.selectedSourceId)) {
       model.selectedSourceId = '';
+    }
+    ObsController.refreshFilters();
+  }
+
+  /** Reload the filter list of the currently selected source. */
+  static refreshFilters(): void {
+    const model = ObsController.model;
+    if (model.selectedSourceId === '') {
+      model.filters = [];
+      return;
+    }
+    const nativeFilters: NativeFilterEntry[] = ObsBridge.getFilters(model.selectedSourceId);
+    const filters: FilterItemModel[] = [];
+    for (const entry of nativeFilters) {
+      filters.push(new FilterItemModel(entry.name, entry.typeId, entry.enabled));
+    }
+    model.filters = filters;
+    if (model.filterTypes.length === 0) {
+      model.filterTypes = ObsBridge.getFilterTypes();
+    }
+  }
+
+  /** Scene cut: bind the program channel to another scene (desktop parity). */
+  static selectScene(id: string): void {
+    const model = ObsController.model;
+    if (ObsBridge.selectScene(id)) {
+      model.selectedSceneId = id;
+      ObsController.refreshSources();
+    }
+  }
+
+  static addFilterToSelectedSource(filterTypeId: string): void {
+    const model = ObsController.model;
+    if (model.selectedSourceId === '') {
+      return;
+    }
+    if (ObsBridge.addFilter(model.selectedSourceId, filterTypeId)) {
+      ObsController.refreshFilters();
+    } else {
+      model.bridgeNotice = $r('app.string.notice_add_filter_fail', filterTypeId);
+    }
+  }
+
+  static removeFilterFromSelectedSource(filterName: string): void {
+    const model = ObsController.model;
+    if (model.selectedSourceId === '') {
+      return;
+    }
+    if (ObsBridge.removeFilter(model.selectedSourceId, filterName)) {
+      ObsController.refreshFilters();
+    }
+  }
+
+  static setFilterEnabled(filterName: string, enabled: boolean): void {
+    const model = ObsController.model;
+    if (model.selectedSourceId === '') {
+      return;
+    }
+    if (ObsBridge.setFilterEnabled(model.selectedSourceId, filterName, enabled)) {
+      ObsController.refreshFilters();
     }
   }
 

@@ -37,6 +37,14 @@ napi_value NativeGetSources(napi_env env, napi_callback_info info);
 napi_value NativeAddSource(napi_env env, napi_callback_info info);
 napi_value NativeRemoveSource(napi_env env, napi_callback_info info);
 napi_value NativeSetSourceVisible(napi_env env, napi_callback_info info);
+napi_value NativeSelectScene(napi_env env, napi_callback_info info);
+
+// Filters ---------------------------------------------------------------------
+napi_value NativeGetFilterTypes(napi_env env, napi_callback_info info);
+napi_value NativeGetFilters(napi_env env, napi_callback_info info);
+napi_value NativeAddFilter(napi_env env, napi_callback_info info);
+napi_value NativeRemoveFilter(napi_env env, napi_callback_info info);
+napi_value NativeSetFilterEnabled(napi_env env, napi_callback_info info);
 
 // Audio -------------------------------------------------------------------------
 napi_value NativeGetAudioTracks(napi_env env, napi_callback_info info);
