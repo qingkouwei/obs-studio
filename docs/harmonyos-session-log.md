@@ -281,3 +281,14 @@ docs/harmonyos-migration.md (609 行)  docs/harmonyos-session-log.md (本文件)
 5. 动手前先跑 `build-obs.sh --skip-deps`，以 `check-contracts.sh` 的 38 项作为基线
 
 **不要提交构建产物**（§3.3 那些目录已被 `.gitignore` 覆盖，但 `harmony/` 曾被 `/*` 白名单规则整体忽略过，已修）。
+
+### 窗口采集 Picker 调研结论（2026-10-02 晨）
+
+真机验证：`OH_CAPTURE_SPECIFIED_WINDOW` + 空 missionIDs 时 Init/Start 成功但**系统不弹窗口选择 Picker**、无帧流（"空列表自动弹 Picker"的文档推断不成立）。buffer 拷贝路径已对齐 display-capture（GetAddr+alpha 0xFF），mission-0 不再硬失败。
+
+官方 C API 给出的正解线索（待实现验证）：
+1. `OH_AVScreenCapture_SetUserSelectedCallback`（typedef `OH_AVScreenCapture_OnUserSelected`）——"当用户在授权界面（选择界面）选择参数时，系统通过该回调将用户选择的参数返回给应用；**应在启动授权流程前完成注册**"。说明授权选择界面存在，且选择结果（含 windowId）经此回调返回。
+2. `OH_AVScreenCapture_PresentPicker`——"录屏开始后再次弹出 picker，动态更新录制源（窗口、屏幕）"。
+候选流程：Start（SPECIFIED_WINDOW，空 IDs）→ 注册 OnUserSelected 接选择结果 → 若系统界面未自动弹，Start 后主动 PresentPicker。下一步照此实现并真机验证。
+
+设备侧注意：重启后 OBS 窗口默认非最大化 → 堆叠布局；来源面板按钮在滚动区内，自动化点击需先 swipe 滚到可视再 dumpLayout 取坐标（findtext 只命中可见节点）。
