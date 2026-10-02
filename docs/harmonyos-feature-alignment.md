@@ -36,7 +36,7 @@
 1. **窗口采集** —— **代码侧完备，卡在 ACL（10-02）**：window-capture 已对齐 display-capture 帧路径，mission-0（用户选窗）模式跑通 Init/Start；三条官方 Picker 机制（SetSelectionCallback / StrategyForPickerPopUp / PresentPicker）全部接入后仍不弹，PresentPicker 返回 OPERATE_NOT_PERMIT（官方释义=缺权限）。剩余依赖：CUSTOM_SCREEN_RECORDING 受限权限 AGC 审批 + 签名配置（申请材料见 harmonyos-agc-permission-application.md），审批后复测。
 2. ~~相机源~~ —— **已闭环（10-02）**：三层叠加 bug 全修（MapPlanes 对 ImageReceiver buffer 报 stride=1 垃圾值→改用 Image Kit 权威 GetRowStride；NV12 单组件半平面布局；Maleoon GLES 拒绝 libobs 的 GL_R8+GL_RG16 多平面上传→CPU NV12→RGBA 转换）。预览+滤镜叠加+录制成片三重真机验证。
 3. ~~色准~~ —— **已闭环（10-02 晚）**：真机色卡测量实锤"解码一次不编码"根因（八个非端点灰阶精确落在 sRGB EOTF 曲线上：128→54、224→188；饱和原色因端点不动而幸免）。修复 = GS_BGRA 渲染目标恢复 GL_SRGB8_ALPHA8（§3.4 被 Maleoon 拒的只是 BGRA_EXT 三元组，RGBA/UNSIGNED_BYTE 组合是 ES3.0-core 被接受；可采样源纹理保持线性，其解码在 shader 里显式做）。修复后录制色值与恒等截图 Δ≤4。测量与实验全记录：harmonyos-color-measurement.md。
-4. **HEVC/AV1 硬编**：OH_VideoEncoder 支持（HDR Vivid 文档证实 HEVC Main10 路径），harmony-vcodec 只做了 H.264。
+4. **HEVC 硬编** —— **录制链路已闭环（10-02 深夜）**：`harmony_hevc` 编码器（OH_VideoEncoder，插件早已注册、ENABLE_HEVC=ON）现接入设置面板"编码器(录制)"下拉 → SettingsStore 持久化 → 录制 config `videoCodec` → 桥接层 `CreateVideoEncoder` 按 codec 选 id 链（HEVC 请求下 `harmony_hevc→harmony_h264→obs_x264` 逐级退让；H.264 请求永不静默升级）。真机实证：切 HEVC→保存→杀应用→重启（持久层恢复）→录制，日志 `HEVC encoder started 1920x1080@30`，成片 ffprobe `codec_name=hevc`。推流仍固定 H.264（legacy RTMP/FLV 无标准 HEVC tag，与桌面一致需 SRT/QUIC 才能上 HEVC）。**剩余 AV1 / HDR Vivid**（Main10 路径 OH_VideoEncoder 支持，属 W3 差异化项，未接 UI）。
 5. ~~长时任务规范化~~ —— **已闭环（10-02）**：audioRecording continuous task 接入（LongRunningTask.ets + backgroundModes 声明），息屏录制实测 544s 成片。见 journey §5.6。
 6. ~~设置面板/配置持久化~~ —— **已闭环（10-02 晚）**：bindSheet 设置面板（分辨率 720p–4K / fps 30·60 / 录制与推流码率 / RTMP 服务器密钥）+ preferences JSON 持久化（字段级合并）+ nativeResetVideo 画布热切换（输出活跃时禁用，同桌面纪律）；重启自动恢复。**成片实证**：设 30fps 后录 461s，ffprobe `r_frame_rate=30/1`、13822 帧。
 7. **rtmp-services 远程更新**：mbedTLS 证书链问题（可修，非阻塞）。
@@ -55,12 +55,12 @@
 
 ## 对齐度估算
 
-- 按功能点粗算：核心链路 100%，全功能面 **≈40%**；
-- 补完 ❌-A 前两项 + 二档全部 → 观感 **≈65-70%**；
+- 按功能点粗算：核心链路 100%，全功能面 **≈60%**（❌-A 已完成 1 相机 / 2 窗口(代码侧) / 3 色准 / 4 HEVC录制 / 5 长时任务 / 6 设置面板，余 7 rtmp-services 远程更新、8 虚拟摄像头）；
+- 补完 ❌-A 剩余两项 + 二档转场/图片文字源前端 → 观感 **≈70%**；
 - 剩余差距集中在"平台模型差异项"（❌-B），这部分不应追平，应转成鸿蒙特性创新（见系列文章大纲的"前沿探索篇"）。
 
 ## 建议的实施波次
 
 - **W1（对齐补票）**：窗口 Picker + 相机源流程 + 滤镜/转场/多场景前端面板 + 色准
-- **W2（规范与上架）**：长时任务 + AVSession + AGC 受限权限材料（CUSTOM_SCREEN_RECORDING）+ 隐私合规文案 → 具备上架形态
+- **W2（规范与上架）**：长时任务 ✅ + AVSession（判定为采集类豁免，依据与口径见 harmonyos-store-compliance.md ✅）+ AGC 受限权限材料 ✅（待提交审批）+ 隐私合规文案 ✅（条目骨架已成，待挂链）→ 工程侧已具备上架形态
 - **W3（差异化创新）**：HEVC/AV1 + HDR Vivid 录制、碰一碰开播/分享流、小艺意图一句话录制、分布式流转（手机当导播台/摄像头无线接入）、ArkWeb 浏览器源、实况窗直播状态
