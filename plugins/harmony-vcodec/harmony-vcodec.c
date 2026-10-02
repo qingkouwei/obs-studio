@@ -831,8 +831,31 @@ static const char *venc_name_hevc(void *unused)
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE("harmony-vcodec", "en-US")
 
+/* One-shot capability probe, logged at module load. The SDK header predates
+ * the AV1 constant (API 23+ per the docs), so the MIME string is inlined;
+ * CreateByMime returns NULL on any platform without the encoder, which is
+ * exactly the answer we want. */
+static void venc_probe_optional_codecs(void)
+{
+	/* The MIME constants are extern const char* (not literals), so the
+	 * array is built at runtime. */
+	const char *probes[] = {
+		OH_AVCODEC_MIMETYPE_VIDEO_AVC,
+		OH_AVCODEC_MIMETYPE_VIDEO_HEVC,
+		"video/av01", /* OH_AVCODEC_MIMETYPE_VIDEO_AV1, API 23+ */
+		"video/x-vnd.on2.vp9",
+	};
+	for (size_t i = 0; i < sizeof(probes) / sizeof(probes[0]); i++) {
+		OH_AVCodec *c = OH_VideoEncoder_CreateByMime(probes[i]);
+		blog(LOG_INFO, LOG_PREFIX "encoder probe '%s': %s", probes[i], c ? "available" : "not available");
+		if (c != NULL)
+			OH_VideoEncoder_Destroy(c);
+	}
+}
+
 bool obs_module_load(void)
 {
+	venc_probe_optional_codecs();
 	struct obs_encoder_info h264_info = {
 		.id = "harmony_h264",
 		.type = OBS_ENCODER_VIDEO,
