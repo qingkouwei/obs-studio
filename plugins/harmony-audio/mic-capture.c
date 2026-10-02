@@ -276,9 +276,12 @@ static bool mic_capture_start(struct harmony_mic_capture *mic)
 	}
 
 	mic->capturer = capturer;
+	blog(LOG_DEBUG, LOG_PREFIX "capturer generated, selecting device");
 	mic_capture_select_device(mic, mic->device_id);
+	blog(LOG_DEBUG, LOG_PREFIX "device selected, calling Start");
 
 	result = OH_AudioCapturer_Start(capturer);
+	blog(LOG_DEBUG, LOG_PREFIX "Start returned %d", (int)result);
 	if (result != AUDIOSTREAM_SUCCESS) {
 		blog(LOG_ERROR, LOG_PREFIX "OH_AudioCapturer_Start failed with %d", (int)result);
 		OH_AudioCapturer_Release(capturer);
