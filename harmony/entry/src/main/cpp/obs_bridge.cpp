@@ -890,8 +890,15 @@ napi_value NativeCreateScene(napi_env env, napi_callback_info info)
     /* Bind to the program channel so the graphics thread actually renders
      * this scene: obs_render_main_texture() draws channel 0, and sources
      * only activate once they are in the render tree. Without this the
-     * canvas stays empty and capture plugins never start. */
-    obs_set_output_source(0, source);
+     * canvas stays empty and capture plugins never start. Once the
+     * transition wrapper owns channel 0 it keeps ownership (invariant:
+     * after g_programTransition exists, channel 0 is always the wrapper),
+     * so route through obs_transition_set instead of displacing it. */
+    if (g_programTransition != nullptr) {
+        obs_transition_set(g_programTransition, source);
+    } else {
+        obs_set_output_source(0, source);
+    }
     return CreateString(env, id);
 #endif
 }
