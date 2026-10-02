@@ -318,7 +318,7 @@ current has media and not apply background_task or Resource::AUDIO
 
 **教训**：① "buffer 元数据撒谎"在鸿蒙是多源的：同一个 MapPlanes 在不同生产者（AVScreenCapture vs ImageReceiver）手里可靠性不同，永远优先用数据生产方自己的 API；② 数据对但画面黑时，把 CPU 域和 GPU 域用探针切开——本案两个探针各排除一半，剩下的合成器 GL 错误就是全部真相。
 
-### 5.10 色准闭环：一张色卡、一次测量、一个渲染目标格式（10-02 晚）
+### 5.9 色准闭环：一张色卡、一次测量、一个渲染目标格式（10-02 晚）
 
 **问题**（❌-A3 长期挂账）：观感"大体正常"的 8bit canvas 疑似 sRGB 双重编码。
 
@@ -332,7 +332,7 @@ current has media and not apply background_task or Resource::AUDIO
 
 **附带发现**：反复采集会话启停+焦点切换后应用 ANR（THREAD_BLOCK_6S）、文件 0 字节——旧构建同样复现，独立遗留待专项（规避：测量前重启、单轮会话抓完）。
 
-### 5.11 窗口 Picker：三条官方机制全部接入，卡在一纸 ACL（10-02）
+### 5.10 窗口 Picker：三条官方机制全部接入，卡在一纸 ACL（10-02）
 
 mission-0 模式 Init/Start 成功但系统不弹窗口选择器（"空 missionIDs 自动弹 Picker"的文档推断被真机证伪）。按官方 C API 逐条试：`SetSelectionCallback`（须在启动前注册）+ `StrategyForPickerPopUp(true)`（SetCaptureStrategy 成功但无 Picker）+ `PresentPicker`（Init 后、Start 前后各调一次均返回 OPERATE_NOT_PERMIT=2）。错误码官方释义"未获得必要权限或处于非法状态"——最后嫌疑锁定 **CUSTOM_SCREEN_RECORDING（system_basic，AGC ACL 审批）**：正是权限申请材料里的那一项。代码侧完备，待审批过 + 签名 profile 加上后复测。这是"迁移工作的最后一公里有时不在代码里，在流程里"的活案例。
 
