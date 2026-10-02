@@ -1278,9 +1278,25 @@ napi_value NativeAddFilter(napi_env env, napi_callback_info info)
     if (filter == nullptr) {
         return CreateBool(env, false); // type not registered
     }
+    /* obs_source_filter_add is void and silently rejects incompatible
+     * capability pairs (filter_compatible in obs-source.c): an audio-only
+     * filter on a video-only source is created, refused, and destroyed —
+     * yet our old code still returned true, so the panel showed a phantom
+     * filter. Mirror the check (audio-only filter ⇒ source must carry
+     * OBS_SOURCE_AUDIO) and report the truth. */
+    const uint32_t f_caps = obs_source_get_output_flags(filter);
+    const uint32_t s_caps = obs_source_get_output_flags(source);
+    if ((f_caps & OBS_SOURCE_AUDIO) != 0 && (f_caps & OBS_SOURCE_VIDEO) == 0
+        && (s_caps & OBS_SOURCE_AUDIO) == 0) {
+        obs_source_release(filter);
+        OH_LOG_WARN(LOG_APP, "addFilter: '%{public}s' is audio-only, source '%{public}s' has no audio, refused",
+                    filterTypeId.c_str(), obs_source_get_name(source));
+        return CreateBool(env, false);
+    }
     obs_source_filter_add(source, filter);
+    const bool added = obs_source_get_filter_by_name(source, filterTypeId.c_str()) != nullptr;
     obs_source_release(filter); // source holds the ref now
-    return CreateBool(env, true);
+    return CreateBool(env, added);
 #endif
 }
 
