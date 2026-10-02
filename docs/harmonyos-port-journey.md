@@ -344,6 +344,14 @@ mission-0 模式 Init/Start 成功但系统不弹窗口选择器（"空 missionI
 
 上架规范里"音视频应用必须接入 AVSession"的表述容易误伤录屏工具。查官方《后台播放》《应用接入 AVSession 场景介绍》原文：强制条件是**后台播放**媒体流（STREAM_USAGE_MUSIC/MOVIE/AUDIOBOOK/GAME），违规后果是退后台被"静音并冻结"；官方明确"游戏、直播等场景，接入 AVSession 是可选项，取决于是否有后台播放诉求"。对照本应用全部音频通路：AudioCapturer/PlaybackCapture 是**采集侧**，编码推流不落播放语义，libobs 在鸿蒙构建根本没启用回放后端（无 AudioRenderer 输出，预览无声画）——不存在受约束的播放流，豁免成立。后台存续走官方给采集类业务准备的通道：audioRecording 长时任务（已实证 544s）。判定依据、审核问询答复口径、隐私政策六条必备数据流披露（屏幕/内录/相机/本地存储/网络/键鼠可视化）整理为 docs/harmonyos-store-compliance.md，与 AGC 权限申请材料配套构成上架合规包。
 
+### 5.13 rtmp-services 远程更新：一句报错后面躺着两个 bug（10-03 凌晨）
+
+日志里只有一句 `Remote update ... failed: Connection timed out after 300531 milliseconds`，直觉去查网络。对照实验却出现矛盾：设备 wget 同一 URL 一秒成功。拆开看是**两层独立缺陷叠加**：其一，300 秒不是网络慢——file-updater 不设连接超时，而本网络到 obsproject.com 的 IPv6 路由"ICMPv6 通、TCP/443 黑洞"（ping6 通、wget v4 成功为证），curl 线程解析器 AAAA 优先，每个地址烧完整 SYN 重传表。修复=CONNECTTIMEOUT 10/TIMEOUT 60。其二，加了超时后错误立刻换了一句：`mbedTLS: The certificate is not correctly signed by the trusted CA`——这才是长期存在的真身：libcurl(OHOS) 构建期没有 CA 默认路径（翻 curl 源码确认 CURL_CA_BUNDLE 宏在 OHOS 配置头未定义）、鸿蒙沙箱内没有可读的系统 CA 文件、curl 也**不读**同名环境变量（它是编译期常量不是运行时开关）。修复三件套：curl.org CA bundle 打进 rawfile（随素材树提取到 dataDir/certs/）、nativeInit 里 setenv、file-updater 尊重 CURL_CA_BUNDLE 设 CURLOPT_CAINFO（对桌面零行为变化）。真机 `Successfully updated file 'services.json' (version 293)`，模块加载后 1.2 秒完成。教训：**报错文案是表象层，对照实验才分层**——先修超时不只为成功，是为了让下一层错误显形。
+
+### 5.14 转场接线：channel 0 的所有权游戏（10-03 凌晨）
+
+obs-transitions 早就加载了，接前端时踩到 libobs 的一道硬检查：`transition_valid()` 要求 `info.type == OBS_SOURCE_TYPE_TRANSITION`——**场景源不能直接挂转场**。正确姿势抄 Qt 前端与内置 slideshow：养一个私有 `fade_transition` 壳源持有节目通道——首次带时长的场景切换把当前通道源 seed 进壳（obs_transition_set）、壳绑 channel 0、`obs_transition_start(AUTO, duration)` 淡入目标；之后的切换复用同一个壳（libobs 内部换 A/B 继续 tick）；时长<=0 或插件缺席退回直切。由此引出一条**所有权不变量**：壳一旦诞生，channel 0 永远归它——NativeCreateScene 的直绑逻辑必须改道（壳在场时新场景走 obs_transition_set 而非 obs_set_output_source 抢通道），否则新建场景会打断转场壳。这类"全局资源归属约定"是薄桥接层最容易漏的账。设置面板加"场景切换"档位（切/300/600/1000ms）持久化；音频四滤镜（增益/噪声阈值/降噪/同步偏移）同批进候选清单。进包验证（bridge.so 符号 + abc 标识符）完成；叠化观感与听感的真机复验待设备回线。
+
 ## 6. 调试方法论（本项目的可复用资产）
 
 1. **日志先行**：给目标库接上宿主日志（3.0）是一切的前提。
@@ -364,7 +372,8 @@ mission-0 模式 Init/Start 成功但系统不弹窗口选择器（"空 missionI
 | 10-01 深夜 | 后台录制实测通过（221s 成片、抽帧真实）；**全部诊断探针清理**（7 文件）后全链路冒烟复验通过；git 基线提交并推送 fork（harmonyos-port 分支） |
 | 10-02 | **W1 滤镜面板 + 多场景切换真机跑通**；**息屏继续录闭环**（长时任务，544s 成片 §5.6）；**color_filter 黑屏双根因修复**（插件 data 进包 + obs_get_source_defaults §5.7）；**相机源三层 bug 修复真机跑通**（§5.8）；最大化启动修复堆叠布局；窗口 Picker 三条机制接入、锁定 ACL 依赖（§5.9） |
 | 10-02 晚 | 色准闭环（sRGB 渲染目标，§5.9→编号调整后 §5.9 色准/§5.10 Picker）；设置面板 + 配置持久化（30fps 成片实证）；**HEVC 硬编接入设置面板与录制链路**（ffprobe codec=hevc 实证 §5.11）；**AVSession 合规判定 + 隐私政策要点**（采集类豁免 §5.12，docs/harmonyos-store-compliance.md） |
-| 下一步 | draft PR 台账 + 小颗粒 PR 拆分；窗口 Picker 待 CUSTOM_SCREEN_RECORDING ACL 审批后复测；隐私政策页挂链（文案已备）；ANR 专项（坏态图形初始化 51s 阻塞）；AV1/HDR Vivid（W3） |
+| 10-03 凌晨 | **rtmp-services 远程更新闭环**（CA bundle + 连接超时双层修复，services.json v293 实拉 §5.13）；AV1/VP9 真机探测=本机无硬件；**虚拟摄像头调研→改判 ❌-B**；**转场接线**（私有 fade 壳持有 channel 0 + 所有权不变量 §5.14）；音频四滤镜进面板；ANR 复现脚本固化（设备掉线未竟） |
+| 下一步 | 窗口 Picker 待 CUSTOM_SCREEN_RECORDING ACL 审批后复测；隐私政策页发布挂链；ANR 专项（等设备回线跑 anr-repro.sh 抓栈）；转场叠化+音频滤镜听感真机复验；HDR Vivid（W3） |
 
 > 说明：验证机 MatePad Edge 是 Pad/PC 双形态设备，PC 模式即真 PC 形态，此前所有实测（预览/录制/推流/Picker 交互）均在 PC/2in1 模式下完成，不存在"另找真 PC 复测"的遗留项。
 
@@ -376,7 +385,9 @@ mission-0 模式 Init/Start 成功但系统不弹窗口选择器（"空 missionI
 - 诊断探针全链清理（device_draw/attrbuf/uniform/shader dump/canvas 采样/帧计数）
 - ~~窗口采集、相机源的 Picker/权限流程~~ —— 相机源 10-02 已闭环（§5.8）；窗口 Picker 代码侧完备，卡 CUSTOM_SCREEN_RECORDING ACL 审批（§5.9）
 - AGC 受限权限审批材料（已备好 docs/harmonyos-agc-permission-application.md，待提交审批）
-- rtmp-services 远程更新失败（mbedTLS 证书链，非阻塞，本地 package 兜底）
+- ~~rtmp-services 远程更新失败（mbedTLS 证书链，非阻塞，本地 package 兜底）~~ —— **10-03 凌晨已闭环**（§5.13）：双层根因（无 CA 源 + 无连接超时遇 IPv6 黑洞），真机实拉 services.json v293
+- **转场/音频滤镜真机观感复验**（10-03 凌晨代码闭环、进包验证完成，叠化动画与听感待设备回线复验）
+- **AV1**：真机探测本机（Maleoon 916B）无 AV1/VP9 硬件编码器——非"未做"而是"硬件不支持"，归 W3 换机项
 
 ## 9. 上游 PR 候选（按可合入性排序）
 
