@@ -196,6 +196,7 @@ struct Index {
           }
           .layoutWeight(1)
           .height('100%')
+          .constraintSize({ minHeight: 260 })
 
           this.SideDocks()
         }
@@ -210,6 +211,7 @@ struct Index {
           }
           .layoutWeight(1)
           .width('100%')
+          .constraintSize({ minHeight: 260 })
 
           this.SideDocks()
         }
