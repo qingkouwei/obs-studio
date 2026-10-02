@@ -307,6 +307,30 @@
     {
       "name": "notice_reset_video_fail",
       "value": "Canvas reset failed (kept current settings)"
+    },
+    {
+      "name": "src_text",
+      "value": "Text"
+    },
+    {
+      "name": "notice_image_copy_fail",
+      "value": "Could not copy the image into the app sandbox"
+    },
+    {
+      "name": "text_source_title",
+      "value": "Add Text Source"
+    },
+    {
+      "name": "text_source_hint",
+      "value": "Type the text to display…"
+    },
+    {
+      "name": "text_source_add",
+      "value": "Add"
+    },
+    {
+      "name": "text_source_cancel",
+      "value": "Cancel"
     }
   ]
 }

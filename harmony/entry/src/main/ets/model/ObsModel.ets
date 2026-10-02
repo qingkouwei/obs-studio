@@ -5,6 +5,8 @@ import { Logger } from '../common/Logger';
 import { LongRunningTask } from '../common/LongRunningTask';
 import { ObsSettings, SettingsStore } from '../common/SettingsStore';
 import { common } from '@kit.AbilityKit';
+import { fileIo } from '@kit.CoreFileKit';
+import { picker } from '@kit.CoreFileKit';
 
 /**
  * Observable application state for the OBS ArkUI frontend, plus the
@@ -194,6 +196,10 @@ export class ObsController {
   private static model: ObsAppState = ObsAppState.getInstance();
   /** UIAbility context, used for continuous-task acquire/release. */
   static appContext: common.UIAbilityContext | undefined = undefined;
+  /** Sandbox files dir captured at init — image sources are copied here so
+   * libobs can open them with a plain path (media URIs are not open()able by
+   * native code without a URI-permission handshake). */
+  static filesDir: string = '';
 
   /** Called once from the main page's aboutToAppear(). */
   static initialize(configDir: string, codeDir: string, dataDir: string, defaultSceneName: string = 'Scene 1',
@@ -202,6 +208,7 @@ export class ObsController {
     if (context) {
       ObsController.appContext = context;
     }
+    ObsController.filesDir = configDir;
     model.recordingPath = `${configDir}/recording.mp4`;
     const coreOk = ObsBridge.init(configDir, codeDir, dataDir);
     model.coreReady = coreOk;
@@ -453,20 +460,88 @@ export class ObsController {
     }
   }
 
-  static addSource(typeId: string): void {
+  static addSource(typeId: string, settingsJson: string = '{}'): void {
     const model = ObsController.model;
     if (model.selectedSceneId === '') {
       model.bridgeNotice = $r('app.string.notice_pick_scene');
       return;
     }
     const name = `${typeId} ${model.sourceNameCounter}`;
-    const id = ObsBridge.addSource(model.selectedSceneId, typeId, name, '{}');
+    const id = ObsBridge.addSource(model.selectedSceneId, typeId, name, settingsJson);
     if (id !== '') {
       model.sourceNameCounter += 1;
       ObsController.refreshSources();
     } else {
       model.bridgeNotice = $r('app.string.notice_add_source_fail', typeId);
     }
+  }
+
+  /**
+   * Image source via the system file picker (W2 二档前端). The picker hands
+   * back a media-library URI; native code cannot open() it directly, so the
+   * bytes are copied into the app sandbox (files/img-<n>.<ext>) and the copy
+   * path becomes the source's "file" setting — the same trick the desktop
+   * build uses when a scene references a file outside the profile.
+   */
+  static async addImageSourcePicked(): Promise<void> {
+    const model = ObsController.model;
+    if (model.selectedSceneId === '') {
+      model.bridgeNotice = $r('app.string.notice_pick_scene');
+      return;
+    }
+    try {
+      const ctx = ObsController.appContext;
+      if (!ctx) {
+        return;
+      }
+      const docPicker = new picker.DocumentViewPicker(ctx);
+      const uris = await docPicker.select({
+        maxSelectNumber: 1,
+        fileSuffixFilters: ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']
+      });
+      if (uris.length === 0) {
+        return;
+      }
+      const copied = ObsController.copyUriToSandbox(uris[0]);
+      if (copied === '') {
+        model.bridgeNotice = $r('app.string.notice_image_copy_fail');
+        return;
+      }
+      ObsController.addSource('image_source', JSON.stringify({ file: copied }));
+    } catch (err) {
+      Logger.error('image picker failed', Logger.asError(err as Object));
+      model.bridgeNotice = $r('app.string.notice_image_copy_fail');
+    }
+  }
+
+  /** Copy one picker URI into filesDir; returns the sandbox path or ''. */
+  private static copyUriToSandbox(uri: string): string {
+    try {
+      const src = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
+      const name = decodeURIComponent(uri.split('/').pop() ?? 'image')
+        .replace(/[^A-Za-z0-9._-]/g, '_');
+      const suffix = `_${Date.now()}`;
+      const dot = name.lastIndexOf('.');
+      const base = dot > 0 ? name.slice(0, dot) : name;
+      const ext = dot > 0 ? name.slice(dot) : '.png';
+      const dest = `${ObsController.filesDir}/img-${base.slice(0, 48)}${suffix}${ext}`;
+      const dst = fileIo.openSync(dest, fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY | fileIo.OpenMode.TRUNC);
+      const buf = new ArrayBuffer(fileIo.statSync(src.fd).size);
+      fileIo.readSync(src.fd, buf);
+      fileIo.writeSync(dst.fd, buf);
+      fileIo.closeSync(src);
+      fileIo.closeSync(dst);
+      Logger.info(`image copied to sandbox: ${dest} (${buf.byteLength} bytes)`);
+      return dest;
+    } catch (err) {
+      Logger.error('image copy failed', Logger.asError(err as Object));
+      return '';
+    }
+  }
+
+  /** Text source with the given content (font defaults merge in libobs). */
+  static addTextSource(text: string): void {
+    ObsController.addSource('text_ft2_source', JSON.stringify({ text: text }));
   }
 
   static removeSelectedSource(): void {
