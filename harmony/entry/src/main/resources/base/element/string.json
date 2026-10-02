@@ -307,6 +307,30 @@
     {
       "name": "notice_reset_video_fail",
       "value": "画布切换失败（保持原设置）"
+    },
+    {
+      "name": "src_text",
+      "value": "文字"
+    },
+    {
+      "name": "notice_image_copy_fail",
+      "value": "图片复制进沙箱失败，无法添加图片源"
+    },
+    {
+      "name": "text_source_title",
+      "value": "添加文字源"
+    },
+    {
+      "name": "text_source_hint",
+      "value": "输入要显示的文字…"
+    },
+    {
+      "name": "text_source_add",
+      "value": "添加"
+    },
+    {
+      "name": "text_source_cancel",
+      "value": "取消"
     }
   ]
 }

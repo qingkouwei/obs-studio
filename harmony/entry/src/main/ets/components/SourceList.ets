@@ -23,12 +23,65 @@ const SOURCE_TYPES: SourceTypeEntry[] = [
   { label: $r('app.string.src_camera'), id: 'harmony_camera_capture' },
   { label: $r('app.string.src_mic'), id: 'harmony_mic_capture' },
   { label: $r('app.string.src_desktop'), id: 'harmony_desktop_audio' },
-  { label: $r('app.string.src_image'), id: 'image_source' },
+  { label: $r('app.string.src_image'), id: '@picker:image_source' },
+  { label: $r('app.string.src_text'), id: '@dialog:text_ft2_source' },
 ];
 
 @ComponentV2
 export struct SourceList {
   @Param @Require model: ObsAppState;
+  /** Text-source input sheet (add flow). */
+  @Local textSheetOpen: boolean = false;
+  @Local textDraft: string = '';
+
+  @Builder
+  TextSourceSheet() {
+    Column({ space: 10 }) {
+      Text($r('app.string.text_source_title'))
+        .fontSize(14)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.obs_text_primary'))
+        .width('100%')
+        .margin({ top: 14 })
+      TextArea({ text: this.textDraft, placeholder: $r('app.string.text_source_hint') })
+        .fontSize(13)
+        .height(120)
+        .width('100%')
+        .backgroundColor($r('app.color.obs_panel_border'))
+        .fontColor($r('app.color.obs_text_primary'))
+        .onChange((v: string) => {
+          this.textDraft = v;
+        })
+      Button($r('app.string.text_source_add'))
+        .type(ButtonType.Normal)
+        .fontSize(13)
+        .height(32)
+        .width('100%')
+        .fontColor($r('app.color.obs_text_primary'))
+        .backgroundColor($r('app.color.obs_accent'))
+        .borderRadius(4)
+        .enabled(this.textDraft.trim().length > 0)
+        .onClick(() => {
+          ObsController.addTextSource(this.textDraft);
+          this.textSheetOpen = false;
+        })
+      Button($r('app.string.text_source_cancel'))
+        .type(ButtonType.Normal)
+        .fontSize(13)
+        .height(32)
+        .width('100%')
+        .fontColor($r('app.color.obs_text_secondary'))
+        .backgroundColor($r('app.color.obs_panel_border'))
+        .borderRadius(4)
+        .onClick(() => {
+          this.textSheetOpen = false;
+        })
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, bottom: 12 })
+    .alignItems(HorizontalAlign.Start)
+    .backgroundColor($r('app.color.obs_background'))
+  }
 
   build() {
     Column({ space: 6 }) {
@@ -67,7 +120,14 @@ export struct SourceList {
             .margin({ right: 6, bottom: 6 })
             .enabled(this.model.coreReady && this.model.selectedSceneId !== '')
             .onClick(() => {
-              ObsController.addSource(entry.id);
+              if (entry.id === '@picker:image_source') {
+                ObsController.addImageSourcePicked();
+              } else if (entry.id === '@dialog:text_ft2_source') {
+                this.textDraft = '';
+                this.textSheetOpen = true;
+              } else {
+                ObsController.addSource(entry.id);
+              }
             })
         }, (entry: SourceTypeEntry) => entry.id)
       }
@@ -131,5 +191,13 @@ export struct SourceList {
     .layoutWeight(1)
     .padding(8)
     .alignItems(HorizontalAlign.Start)
+    .bindSheet($$this.textSheetOpen,
+      this.TextSourceSheet(),
+      {
+        height: SheetSize.MEDIUM,
+        dragBar: true,
+        showClose: true,
+        backgroundColor: $r('app.color.obs_background')
+      })
   }
 }
