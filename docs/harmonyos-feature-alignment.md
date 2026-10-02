@@ -38,7 +38,7 @@
 3. ~~色准~~ —— **已闭环（10-02 晚）**：真机色卡测量实锤"解码一次不编码"根因（八个非端点灰阶精确落在 sRGB EOTF 曲线上：128→54、224→188；饱和原色因端点不动而幸免）。修复 = GS_BGRA 渲染目标恢复 GL_SRGB8_ALPHA8（§3.4 被 Maleoon 拒的只是 BGRA_EXT 三元组，RGBA/UNSIGNED_BYTE 组合是 ES3.0-core 被接受；可采样源纹理保持线性，其解码在 shader 里显式做）。修复后录制色值与恒等截图 Δ≤4。测量与实验全记录：harmonyos-color-measurement.md。
 4. **HEVC/AV1 硬编**：OH_VideoEncoder 支持（HDR Vivid 文档证实 HEVC Main10 路径），harmony-vcodec 只做了 H.264。
 5. ~~长时任务规范化~~ —— **已闭环（10-02）**：audioRecording continuous task 接入（LongRunningTask.ets + backgroundModes 声明），息屏录制实测 544s 成片。见 journey §5.6。
-6. **设置面板/配置持久化**：profile 级设置（分辨率/码率/键率）UI 化。
+6. ~~设置面板/配置持久化~~ —— **已闭环（10-02 晚）**：bindSheet 设置面板（分辨率 720p–4K / fps 30·60 / 录制与推流码率 / RTMP 服务器密钥）+ preferences JSON 持久化（字段级合并）+ nativeResetVideo 画布热切换（输出活跃时禁用，同桌面纪律）；重启自动恢复。**成片实证**：设 30fps 后录 461s，ffprobe `r_frame_rate=30/1`、13822 帧。
 7. **rtmp-services 远程更新**：mbedTLS 证书链问题（可修，非阻塞）。
 8. **虚拟摄像头输出**：需调研鸿蒙侧等价机制（系统是否有虚拟视频输入 API；若无，考虑分布式/投屏形态替代叙事）。
 
