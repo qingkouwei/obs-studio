@@ -672,6 +672,17 @@ napi_value NativeInit(napi_env env, napi_callback_info info)
         // obs_reset_video(). Both resolve against the roots set here, so
         // injecting them afterwards would be too late.
         obs_harmony_set_paths(codeDir.c_str(), dataDir.c_str());
+        /* HarmonyOS ships no CA bundle readable from the app sandbox and our
+         * static libcurl was built without a CURL_CA_BUNDLE default, so every
+         * HTTPS request fails "not correctly signed by the trusted CA". The
+         * curl.org bundle is shipped in rawfile and extracted to
+         * <dataDir>/certs/cacert.pem by RawFileExtractor; file-updater picks
+         * this variable up for its easy handles. */
+        {
+            std::string caBundle = dataDir + "/certs/cacert.pem";
+            setenv("CURL_CA_BUNDLE", caBundle.c_str(), 1);
+            OH_LOG_INFO(LOG_APP, "CURL_CA_BUNDLE=%{public}s", caBundle.c_str());
+        }
         base_set_log_handler(ObsLogToHilog, nullptr);
         OH_LOG_INFO(LOG_APP, "obs paths: code=%{public}s data=%{public}s config=%{public}s",
                     codeDir.c_str(), dataDir.c_str(), configDir.c_str());

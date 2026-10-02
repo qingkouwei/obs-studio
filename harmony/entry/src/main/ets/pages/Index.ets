@@ -18,7 +18,7 @@ import { SettingsPanel } from '../components/SettingsPanel';
  * copies left in filesDir. ASSET_STAMP covers dev-time rawfile changes that
  * do not bump versionCode (e.g. staging a plugin's data/ directory).
  */
-const ASSET_STAMP = 'obs-plugins-data-v2';
+const ASSET_STAMP = 'obs-plugins-data-v3';
 
 function resolveBundleVersion(): string {
   try {
