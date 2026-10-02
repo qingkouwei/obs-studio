@@ -22,10 +22,10 @@
 
 | 能力 | 缺口 | 补齐成本 |
 |---|---|---|
-| 滤镜（色彩校正/缩放/色彩空间） | obs-filters 已加载，ArkTS 无滤镜面板 | 低（面板 + obs_source_get_filter_by_id 通路） |
+| ~~滤镜（色彩校正/缩放/色彩空间）~~ | **已闭环（10-02）**：FilterPanel 真机跑通（私有源创建 + defaults 修复） | — |
 | 转场（叠化/滑动） | obs-transitions 已加载，无场景切换 UI | 低 |
-| 图片源 / 文字源 | image-source、text-freetype2 已加载，无 Picker 流程 | 中（文件选择 + fontconfig/字体路径） |
-| 场景切换挂通道 | obs_set_output_source 单场景已通，多场景切换未做 | 低 |
+| ~~图片源 / 文字源~~ | **已闭环（10-02 深夜）**：图片走 DocumentViewPicker→沙箱拷贝→`file` 设置（预览渲染洋红测试图实证）；文字走 bindSheet 输入→`text` 设置（find-font-ohos.c 的 Sans Serif 别名解析默认字体，画布顶部渲染实证） | — |
+| ~~场景切换挂通道~~ | **已闭环（10-02）**：多场景切换真机验证 | — |
 | 软件编码 x264 | obs-x264 加载，未实测（移动端主用硬编，价值低） | 可跳过 |
 | 音频高级能力（降噪/增益/同步偏移） | filters 内含，无 UI 与实测 | 低-中 |
 
