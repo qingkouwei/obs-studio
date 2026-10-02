@@ -33,7 +33,7 @@
 
 ### ❌-A 可补齐（正常工程问题，按优先级）
 
-1. **窗口采集** —— **代码侧完备，卡在 ACL（10-02）**：window-capture 已对齐 display-capture 帧路径，mission-0（用户选窗）模式跑通 Init/Start；三条官方 Picker 机制（SetSelectionCallback / StrategyForPickerPopUp / PresentPicker）全部接入后仍不弹，PresentPicker 返回 OPERATE_NOT_PERMIT（官方释义=缺权限）。剩余依赖：CUSTOM_SCREEN_RECORDING 受限权限 AGC 审批 + 签名配置（申请材料见 harmonyos-agc-permission-application.md），审批后复测。
+1. **窗口采集** —— **真机闭环（10-03 晨）**：调试自动签名早已把 CUSTOM_SCREEN_RECORDING + INPUT_MONITORING 写进 profile 的 allowed-acls（10-02"需 AGC 人工审批后才能测"的判断修正：DevEco 自动签名会代提受限 ACL 申请，调试场景直接可用）。标准"选择共享内容"弹窗走通：用户选"窗口"→ 回调 `capture type 1` → `window capture started by user`，预览实时渲染被选窗口画面（截图实证）。显式 PresentPicker API 调用仍返回 OPERATE_NOT_PERMIT(2)，但标准弹窗路径已满足功能，该 API 留作免弹窗增强（发布版仍需手动 AGC 审批，材料已备）。
 2. ~~相机源~~ —— **已闭环（10-02）**：三层叠加 bug 全修（MapPlanes 对 ImageReceiver buffer 报 stride=1 垃圾值→改用 Image Kit 权威 GetRowStride；NV12 单组件半平面布局；Maleoon GLES 拒绝 libobs 的 GL_R8+GL_RG16 多平面上传→CPU NV12→RGBA 转换）。预览+滤镜叠加+录制成片三重真机验证。
 3. ~~色准~~ —— **已闭环（10-02 晚）**：真机色卡测量实锤"解码一次不编码"根因（八个非端点灰阶精确落在 sRGB EOTF 曲线上：128→54、224→188；饱和原色因端点不动而幸免）。修复 = GS_BGRA 渲染目标恢复 GL_SRGB8_ALPHA8（§3.4 被 Maleoon 拒的只是 BGRA_EXT 三元组，RGBA/UNSIGNED_BYTE 组合是 ES3.0-core 被接受；可采样源纹理保持线性，其解码在 shader 里显式做）。修复后录制色值与恒等截图 Δ≤4。测量与实验全记录：harmonyos-color-measurement.md。
 4. **HEVC 硬编** —— **录制链路已闭环（10-02 深夜）**：`harmony_hevc` 编码器（OH_VideoEncoder，插件早已注册、ENABLE_HEVC=ON）现接入设置面板"编码器(录制)"下拉 → SettingsStore 持久化 → 录制 config `videoCodec` → 桥接层 `CreateVideoEncoder` 按 codec 选 id 链（HEVC 请求下 `harmony_hevc→harmony_h264→obs_x264` 逐级退让；H.264 请求永不静默升级）。真机实证：切 HEVC→保存→杀应用→重启（持久层恢复）→录制，日志 `HEVC encoder started 1920x1080@30`，成片 ffprobe `codec_name=hevc`。推流仍固定 H.264（legacy RTMP/FLV 无标准 HEVC tag，与桌面一致需 SRT/QUIC 才能上 HEVC）。**剩余 AV1 / HDR Vivid**（Main10 路径 OH_VideoEncoder 支持，属 W3 差异化项，未接 UI）。
