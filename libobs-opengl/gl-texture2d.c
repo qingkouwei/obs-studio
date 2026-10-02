@@ -95,6 +95,25 @@ gs_texture_t *device_texture_create(gs_device_t *device, uint32_t width, uint32_
 	tex->base.gl_format = convert_gs_format(color_format);
 	tex->base.gl_internal_format = convert_gs_internal_format(color_format);
 	tex->base.gl_type = get_gl_format_type(color_format);
+#ifdef __OHOS__
+	/* libobs' colour pipeline assumes 8-bit BGRA render targets are
+	 * sRGB-format framebuffers: the explicit colour-management passes
+	 * write linear values and rely on the hardware encode-on-write that
+	 * GL_SRGB8_ALPHA8 provides (desktop maps GS_BGRA to exactly that,
+	 * see convert_gs_internal_format). The §3.4 driver workaround
+	 * downgraded ALL GS_BGRA textures to linear GL_RGBA8, which silently
+	 * removed the write-side encode — measured on device: recorded
+	 * greys land on the sRGB EOTF curve (128→54, 224→188), i.e. the
+	 * chain decodes once and never re-encodes (docs/harmonyos-color-
+	 * measurement.md).
+	 * Restore the encode for RENDER TARGETS only: the triple rejected by
+	 * Maleoon was (SRGB8_ALPHA8, GL_BGRA_EXT, UNSIGNED_BYTE);
+	 * (SRGB8_ALPHA8, GL_RGBA, UNSIGNED_BYTE) is ES3.0-core. Sampled
+	 * source textures keep linear storage (their decode is explicit in
+	 * the shader passes). */
+	if (color_format == GS_BGRA && (flags & GS_RENDER_TARGET) != 0)
+		tex->base.gl_internal_format = GL_SRGB8_ALPHA8;
+#endif
 	tex->base.gl_target = GL_TEXTURE_2D;
 	tex->base.is_dynamic = (flags & GS_DYNAMIC) != 0;
 	tex->base.is_render_target = (flags & GS_RENDER_TARGET) != 0;
