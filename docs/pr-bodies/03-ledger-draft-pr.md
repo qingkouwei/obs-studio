@@ -17,6 +17,9 @@
 | Recording → playable MP4 (h264 1080p60 + aac, surface-input encoder on shared EGL context) | ✅ |
 | RTMP streaming (verified via mediamtx ingest + HLS pull-back) | ✅ |
 | Background recording (app switched away, 221 s file, no ANR) | ✅ |
+| Screen-off recording (audioRecording continuous task, 544 s file across a suspend window) | ✅ |
+| Camera source (Camera Kit + ImageReceiver, CPU NV12→RGBA on GLES drivers that reject planar upload) | ✅ |
+| Per-source filter panel + scene switching (obs-filters/obs-transitions wired to the ArkTS UI) | ✅ |
 
 ## What is in this branch
 
@@ -29,8 +32,11 @@
 
 ## Independently valuable slices (separate PRs)
 
-1. `pr/effect-format-fixes` — format_conversion.effect literal/LOD cleanups (pure bugfix)
-2. `pr/glsl-es-compat` — GLSL ES 3.0 emission fixes in gl-shaderparser.c
+1. `fix/effects-float-literals` — `format_conversion.effect` `65535./4095` int literals ×2 + `sharpness.effect` `8*E` (pure typo fixes, verifiable within-file inconsistency)
+2. `fix/effects-sample-offset` — drop the redundant `, 0` texel-offset on five `Sample` call sites (semantically a no-op everywhere)
+3. `fix/shaderparser-texturelod-float-lod` — emit `float(lod)` for `textureLod`'s float parameter (valid desktop GLSL, required by GLSL ES)
+
+The remaining GLES emission fixes (`gl_PerVertex` skip, `#version 300 es` + precision block, `vec2()` wrap) stay on this ledger branch because they are genuinely OS-gated (`__OHOS__`) — unconditional versions would break desktop; they'd need a "GLES target" capability flag to go upstream, which is one of the RFC's open questions.
 
 More slices to follow (BGRA texture-combo fallbacks, mipmap-filter clamp for single-level textures) as they can be expressed target-neutrally.
 
