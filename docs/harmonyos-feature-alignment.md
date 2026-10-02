@@ -39,8 +39,8 @@
 4. **HEVC 硬编** —— **录制链路已闭环（10-02 深夜）**：`harmony_hevc` 编码器（OH_VideoEncoder，插件早已注册、ENABLE_HEVC=ON）现接入设置面板"编码器(录制)"下拉 → SettingsStore 持久化 → 录制 config `videoCodec` → 桥接层 `CreateVideoEncoder` 按 codec 选 id 链（HEVC 请求下 `harmony_hevc→harmony_h264→obs_x264` 逐级退让；H.264 请求永不静默升级）。真机实证：切 HEVC→保存→杀应用→重启（持久层恢复）→录制，日志 `HEVC encoder started 1920x1080@30`，成片 ffprobe `codec_name=hevc`。推流仍固定 H.264（legacy RTMP/FLV 无标准 HEVC tag，与桌面一致需 SRT/QUIC 才能上 HEVC）。**剩余 AV1 / HDR Vivid**（Main10 路径 OH_VideoEncoder 支持，属 W3 差异化项，未接 UI）。
 5. ~~长时任务规范化~~ —— **已闭环（10-02）**：audioRecording continuous task 接入（LongRunningTask.ets + backgroundModes 声明），息屏录制实测 544s 成片。见 journey §5.6。
 6. ~~设置面板/配置持久化~~ —— **已闭环（10-02 晚）**：bindSheet 设置面板（分辨率 720p–4K / fps 30·60 / 录制与推流码率 / RTMP 服务器密钥）+ preferences JSON 持久化（字段级合并）+ nativeResetVideo 画布热切换（输出活跃时禁用，同桌面纪律）；重启自动恢复。**成片实证**：设 30fps 后录 461s，ffprobe `r_frame_rate=30/1`、13822 帧。
-7. **rtmp-services 远程更新**：mbedTLS 证书链问题（可修，非阻塞）。
-8. **虚拟摄像头输出**：需调研鸿蒙侧等价机制（系统是否有虚拟视频输入 API；若无，考虑分布式/投屏形态替代叙事）。
+7. ~~rtmp-services 远程更新~~ —— **已闭环（10-03 凌晨）**：两层缺陷叠加在同一句"Remote update failed"后面——① libcurl(OHOS) 用 mbedTLS 后端且构建期无 CURL_CA_BUNDLE 默认，鸿蒙沙箱内又没有可读的系统 CA 文件，任何 HTTPS 都死在"certificate is not correctly signed by the trusted CA"；修复=curl.org CA bundle 打进 rawfile（certs/cacert.pem，随素材提取到 dataDir/certs/），nativeInit 设 CURL_CA_BUNDLE 环境变量，file-updater 尊重该变量（CURLOPT_CAINFO）。② 首查时挂 300 秒才报错：更新器不设连接超时，本网络到 obsproject.com 的 IPv6 路由"ICMPv6 通但 TCP/443 黑洞"，curl 线程解析器 AAAA 优先、每个地址烧满 SYN 重传表（wget v4 优先 1 秒即通）；修复=CONNECTTIMEOUT=10 / TIMEOUT=60。真机实证：模块加载 1.2 秒后 "Successfully updated file 'services.json' (version 293)"，缓存目录落盘。
+8. ~~虚拟摄像头输出~~ —— **改判 ❌-B（10-03，调研闭环）**：Camera Kit 输入侧是封闭枚举（内置/USB外接/远程三型），无任何第三方注入虚拟 CameraDevice 的 API；文档里的"虚拟相机"是 DevEco 模拟器调试功能。桌面等价物（DirectShow/CMI 插件/v4l2loopback）全部依赖驱动级安装，沙箱模型下原理性禁止。叙事转换：窗口 Picker（ACL 后）让消费应用"捕获 OBS 预览窗口"= 带系统级用户授权的穷人版虚拟摄像头，安全姿态优于桌面；反方向（手机相机喂 PC 应用）是鸿蒙原生优势且 OBS 已可消费。详见 docs/harmonyos-virtual-camera-research.md。
 
 ### ❌-B 原理性不可行 / 平台模型差异（永远不"对齐"，需产品叙事转换）
 
@@ -55,8 +55,8 @@
 
 ## 对齐度估算
 
-- 按功能点粗算：核心链路 100%，全功能面 **≈60%**（❌-A 已完成 1 相机 / 2 窗口(代码侧) / 3 色准 / 4 HEVC录制 / 5 长时任务 / 6 设置面板，余 7 rtmp-services 远程更新、8 虚拟摄像头）；
-- 补完 ❌-A 剩余两项 + 二档转场/图片文字源前端 → 观感 **≈70%**；
+- 按功能点粗算：核心链路 100%，全功能面 **≈65%**（❌-A 八项全部闭环或改判：1 窗口(代码侧,待ACL) / 2 相机 / 3 色准 / 4 HEVC录制(AV1 经真机探测=本机无硬件，VP9 亦无，归 W3 其他机型) / 5 长时任务 / 6 设置面板 / 7 rtmp-services 远程更新 / 8 虚拟摄像头→改判 ❌-B）；
+- 剩余差距 = 二档转场 UI + 音频高级能力 + ❌-B 平台模型差异项；
 - 剩余差距集中在"平台模型差异项"（❌-B），这部分不应追平，应转成鸿蒙特性创新（见系列文章大纲的"前沿探索篇"）。
 
 ## 建议的实施波次
