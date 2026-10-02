@@ -75,11 +75,17 @@
         }
       },
       {
-        // RESTRICTED permission: suppresses the recurring system privacy dialog
-        // during screen recording. Requires an AGC application/approval and a
-        // release profile that grants it; debug auto-signing will REJECT it.
-        // The app must (and does) degrade gracefully without it: recording
-        // still works, the user just sees the system dialog each session.
+      // RESTRICTED permission: documented effect = suppresses the recurring
+      // system privacy dialog during screen recording on PC/2in1 (API 22+).
+      // Status corrected 10-03: the old note ("debug auto-signing will REJECT
+      // it") was wrong — DevEco auto-signing submits the AGC restricted-ACL
+      // request, and our debug profile's allowed-acls lists both
+      // CUSTOM_SCREEN_RECORDING and INPUT_MONITORING. Window capture is
+      // verified working on MatePad Edge through the STANDARD share-content
+      // dialog (user picked "窗口", capture type 1 delivered); the explicit
+      // PresentPicker API still returns OPERATE_NOT_PERMIT(2), so that call
+      // path remains aspirational. Release builds still need the manual AGC
+      // application (docs/harmonyos-agc-permission-application.md).
         "name": "ohos.permission.CUSTOM_SCREEN_RECORDING",
         "reason": "$string:reason_screen_recording",
         "usedScene": {

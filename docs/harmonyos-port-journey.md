@@ -334,7 +334,9 @@ current has media and not apply background_task or Resource::AUDIO
 
 ### 5.10 窗口 Picker：三条官方机制全部接入，卡在一纸 ACL（10-02）
 
-mission-0 模式 Init/Start 成功但系统不弹窗口选择器（"空 missionIDs 自动弹 Picker"的文档推断被真机证伪）。按官方 C API 逐条试：`SetSelectionCallback`（须在启动前注册）+ `StrategyForPickerPopUp(true)`（SetCaptureStrategy 成功但无 Picker）+ `PresentPicker`（Init 后、Start 前后各调一次均返回 OPERATE_NOT_PERMIT=2）。错误码官方释义"未获得必要权限或处于非法状态"——最后嫌疑锁定 **CUSTOM_SCREEN_RECORDING（system_basic，AGC ACL 审批）**：正是权限申请材料里的那一项。代码侧完备，待审批过 + 签名 profile 加上后复测。这是"迁移工作的最后一公里有时不在代码里，在流程里"的活案例。
+mission-0 模式 Init/Start 成功但系统不弹窗口选择器（"空 missionIDs 自动弹 Picker"的文档推断被真机证伪）。按官方 C API 逐条试：`SetSelectionCallback`（须在启动前注册）+ `StrategyForPickerPopUp(true)`（SetCaptureStrategy 成功但无 Picker）+ `PresentPicker`（Init 后、Start 前后各调一次均返回 OPERATE_NOT_PERMIT=2）。错误码官方释义"未获得必要权限或处于非法状态"——最后嫌疑锁定 **CUSTOM_SCREEN_RECORDING（system_basic，AGC ACL 审批）**：正是权限申请材料里的那一项。这是"迁移工作的最后一公里有时不在代码里，在流程里"的活案例。
+
+**10-03 晨闭环 + 二次修正**：解析签名 profile 发现 **DevEco 自动签名早已把 CUSTOM_SCREEN_RECORDING 和 INPUT_MONITORING 写进了 allowed-acls**（调试场景免人工审批——官方文档《在ACL配置文件中声明权限》：调试阶段自动签名会代提 AGC 受限权限申请）。重测：点"捕获窗口"→ 标准"选择共享内容"弹窗出现 → 选"窗口"卡片 → 回调 `user selected capture type 1` → `window capture started by user`，预览实时渲染被选窗口（截图实证）。两个残留事实要说清：① 显式 `PresentPicker` API 依然返回 OPERATE_NOT_PERMIT(2)——免弹窗直弹这条增强路径仍不通，但标准弹窗已满足功能；② 本权限的**文档语义是"免弹系统隐私告警窗"**，弹窗本身是 user_grant 正道，不该被绕过。教训：**权限状态要查三处**——module.json5 声明、profile allowed-acls、`bm dump` 的 reqPermissionStates（-1=ACL 拒绝/未授予是当时的真相线索，但"审批要 3 个工作日"的预期让我误判为"还没批"，实际自动签名通道早就批完了）。
 
 ### 5.11 HEVC 硬编接线：插件早就注册好了，缺的只是通路（10-02 深夜）
 
