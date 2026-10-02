@@ -347,7 +347,8 @@ mission-0 模式 Init/Start 成功但系统不弹窗口选择器（"空 missionI
 
 ## 8. 已知遗留
 
-- 色彩管理：GS_BGRA→RGBA 退让 + 8bit canvas 的 sRGB 双重编码（观感大体正常，精调项）
+- 色彩管理：~~GS_BGRA→RGBA 退让 + 8bit canvas 的 sRGB 双重编码~~ —— **10-02 晚已闭环**：色卡测量实锤根因后，GS_BGRA 渲染目标恢复 GL_SRGB8_ALPHA8（§3.4 被拒的只是 BGRA_EXT 三元组），录制色值与恒等截图 Δ≤4。详见 docs/harmonyos-color-measurement.md
+- **新遗留（10-02 晚发现）**：反复"采集会话启停 + 应用焦点切换"后应用 ANR（THREAD_BLOCK_6S）、录制文件 0 字节——sRGB 改动前的构建同样复现，属 §3.13 家族的设备侧采集/图形坏态（怀疑 AVScreenCapture 会话快速销毁重建时驱动侧回收路径）；规避=测量前重启设备、单轮会话完成抓取；专项排查待做
 - 插件加载清单的工程化（SELinux/linker-ns 约束下的体面方案）
 - 诊断探针全链清理（device_draw/attrbuf/uniform/shader dump/canvas 采样/帧计数）
 - ~~窗口采集、相机源的 Picker/权限流程~~ —— 相机源 10-02 已闭环（§5.8）；窗口 Picker 代码侧完备，卡 CUSTOM_SCREEN_RECORDING ACL 审批（§5.9）
