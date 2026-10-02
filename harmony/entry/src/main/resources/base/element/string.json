@@ -339,6 +339,22 @@
     {
       "name": "settings_transition_cut",
       "value": "切"
+    },
+    {
+      "name": "filter_gain",
+      "value": "增益"
+    },
+    {
+      "name": "filter_noise_gate",
+      "value": "噪声阈值"
+    },
+    {
+      "name": "filter_noise_suppress",
+      "value": "降噪"
+    },
+    {
+      "name": "filter_late_delay",
+      "value": "同步偏移"
     }
   ]
 }
