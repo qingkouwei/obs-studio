@@ -247,6 +247,62 @@
     {
       "name": "scene_named",
       "value": "场景 %s"
+    },
+    {
+      "name": "settings_title",
+      "value": "设置"
+    },
+    {
+      "name": "settings_video",
+      "value": "视频"
+    },
+    {
+      "name": "settings_resolution",
+      "value": "分辨率"
+    },
+    {
+      "name": "settings_fps",
+      "value": "帧率"
+    },
+    {
+      "name": "settings_apply_video",
+      "value": "应用视频设置"
+    },
+    {
+      "name": "settings_output_busy",
+      "value": "录制或推流进行中，无法切换画布"
+    },
+    {
+      "name": "settings_record",
+      "value": "录制"
+    },
+    {
+      "name": "settings_stream",
+      "value": "推流"
+    },
+    {
+      "name": "settings_video_bitrate",
+      "value": "视频码率(kbps)"
+    },
+    {
+      "name": "settings_audio_bitrate",
+      "value": "音频码率(kbps)"
+    },
+    {
+      "name": "settings_server",
+      "value": "服务器"
+    },
+    {
+      "name": "settings_key",
+      "value": "密钥"
+    },
+    {
+      "name": "settings_close",
+      "value": "保存并关闭"
+    },
+    {
+      "name": "notice_reset_video_fail",
+      "value": "画布切换失败（保持原设置）"
     }
   ]
 }

@@ -5,7 +5,8 @@ import {
   NativeOutputLevel,
   NativeSceneEntry,
   NativeSourceEntry,
-  NativeStreamStats
+  NativeStreamStats,
+  NativeVideoInfo
 } from 'libobs_bridge.so';
 import { Logger } from '../common/Logger';
 
@@ -150,6 +151,26 @@ export class ObsBridge {
       return obsBridgeNative.nativeSelectScene(id);
     } catch (err) {
       Logger.error('nativeSelectScene failed', Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  /** Current canvas geometry; 1080p60 default when the core is unavailable. */
+  static getVideoInfo(): NativeVideoInfo {
+    try {
+      return obsBridgeNative.nativeGetVideoInfo();
+    } catch (err) {
+      Logger.error('nativeGetVideoInfo failed', Logger.asError(err as Object));
+      const fallback: NativeVideoInfo = { width: 1920, height: 1080, fps: 60 };
+      return fallback;
+    }
+  }
+
+  static resetVideo(width: number, height: number, fps: number): boolean {
+    try {
+      return obsBridgeNative.nativeResetVideo(width, height, fps);
+    } catch (err) {
+      Logger.error('nativeResetVideo failed', Logger.asError(err as Object));
       return false;
     }
   }

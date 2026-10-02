@@ -38,6 +38,8 @@ napi_value NativeAddSource(napi_env env, napi_callback_info info);
 napi_value NativeRemoveSource(napi_env env, napi_callback_info info);
 napi_value NativeSetSourceVisible(napi_env env, napi_callback_info info);
 napi_value NativeSelectScene(napi_env env, napi_callback_info info);
+napi_value NativeGetVideoInfo(napi_env env, napi_callback_info info);
+napi_value NativeResetVideo(napi_env env, napi_callback_info info);
 
 // Filters ---------------------------------------------------------------------
 napi_value NativeGetFilterTypes(napi_env env, napi_callback_info info);

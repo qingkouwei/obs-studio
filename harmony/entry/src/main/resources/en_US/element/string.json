@@ -247,6 +247,62 @@
     {
       "name": "scene_named",
       "value": "Scene %s"
+    },
+    {
+      "name": "settings_title",
+      "value": "Settings"
+    },
+    {
+      "name": "settings_video",
+      "value": "Video"
+    },
+    {
+      "name": "settings_resolution",
+      "value": "Resolution"
+    },
+    {
+      "name": "settings_fps",
+      "value": "FPS"
+    },
+    {
+      "name": "settings_apply_video",
+      "value": "Apply video settings"
+    },
+    {
+      "name": "settings_output_busy",
+      "value": "Cannot switch canvas while recording or streaming"
+    },
+    {
+      "name": "settings_record",
+      "value": "Recording"
+    },
+    {
+      "name": "settings_stream",
+      "value": "Streaming"
+    },
+    {
+      "name": "settings_video_bitrate",
+      "value": "Video bitrate (kbps)"
+    },
+    {
+      "name": "settings_audio_bitrate",
+      "value": "Audio bitrate (kbps)"
+    },
+    {
+      "name": "settings_server",
+      "value": "Server"
+    },
+    {
+      "name": "settings_key",
+      "value": "Key"
+    },
+    {
+      "name": "settings_close",
+      "value": "Save & close"
+    },
+    {
+      "name": "notice_reset_video_fail",
+      "value": "Canvas reset failed (kept current settings)"
     }
   ]
 }
