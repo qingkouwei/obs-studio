@@ -50,6 +50,21 @@ export default class EntryAbility extends UIAbility {
         return;
       }
       Logger.info('main page loaded');
+      // A streaming/recording console wants the whole desktop. On PC/2in1 the
+      // window otherwise restores to a small floating size, which drops the
+      // UI into the stacked (< 1200vp) layout and clips the sources panel.
+      // Maximize once the content is up; failures are non-fatal (a plain
+      // tablet keeps its normal layout).
+      try {
+        const win = windowStage.getMainWindowSync();
+        win.maximize().then(() => {
+          Logger.info('main window maximized');
+        }).catch((e: BusinessError) => {
+          Logger.warn(`maximize skipped (code ${e.code})`);
+        });
+      } catch (e) {
+        Logger.warn('getMainWindowSync for maximize failed');
+      }
     });
 
     this.requestUserGrantPermissions();
