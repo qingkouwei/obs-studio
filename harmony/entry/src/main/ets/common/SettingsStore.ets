@@ -19,6 +19,8 @@ export class ObsSettings {
   videoFps: number = 60;
   /** Video codec: 'h264' or 'hevc' (OH_VideoEncoder hardware path). */
   videoCodec: string = 'h264';
+  /** Scene-switch transition: 0 = cut, else fade duration in ms. */
+  sceneTransitionMs: number = 300;
   /** Recording encoder bitrates (kbps). */
   recordVideoKbps: number = 10000;
   recordAudioKbps: number = 192;
@@ -65,6 +67,10 @@ export class SettingsStore {
       }
       if (parsed.videoCodec === 'hevc' || parsed.videoCodec === 'h264') {
         merged.videoCodec = parsed.videoCodec;
+      }
+      if (typeof parsed.sceneTransitionMs === 'number' && parsed.sceneTransitionMs >= 0
+        && parsed.sceneTransitionMs <= 5000) {
+        merged.sceneTransitionMs = parsed.sceneTransitionMs;
       }
       if (typeof parsed.recordVideoKbps === 'number') {
         merged.recordVideoKbps = parsed.recordVideoKbps;

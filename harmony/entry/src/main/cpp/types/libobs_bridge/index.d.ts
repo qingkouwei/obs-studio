@@ -112,7 +112,7 @@ export interface ObsBridgeNative {
   nativeRemoveSource(id: string): boolean;
   nativeSetSourceVisible(id: string, visible: boolean): boolean;
   /** Bind the program channel (channel 0) to another scene — the "scene cut". */
-  nativeSelectScene(id: string): boolean;
+  nativeSelectScene(id: string, durationMs: number): boolean;
 
   /** Current canvas geometry (base size + fps). */
   nativeGetVideoInfo(): NativeVideoInfo;

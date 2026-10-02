@@ -161,6 +161,10 @@ export class ObsAppState {
   @Trace setVideoFps: number = 60;
   /** 'h264' | 'hevc' — video encoder codec for both outputs. */
   @Trace setVideoCodec: string = 'h264';
+
+  /** Scene-switch transition (0 = cut, else fade duration ms). Persisted with
+   * the profile bag as sceneTransitionMs. */
+  @Trace sceneTransitionMs: number = 300;
   @Trace setRecordVideoKbps: number = 10000;
   @Trace setRecordAudioKbps: number = 192;
   @Trace setStreamVideoKbps: number = 2500;
@@ -237,6 +241,7 @@ export class ObsController {
       model.setVideoHeight = s.videoHeight;
       model.setVideoFps = s.videoFps;
       model.setVideoCodec = s.videoCodec;
+      model.sceneTransitionMs = s.sceneTransitionMs;
       model.setRecordVideoKbps = s.recordVideoKbps;
       model.setRecordAudioKbps = s.recordAudioKbps;
       model.setStreamVideoKbps = s.streamVideoKbps;
@@ -398,7 +403,7 @@ export class ObsController {
   /** Scene cut: bind the program channel to another scene (desktop parity). */
   static selectScene(id: string): void {
     const model = ObsController.model;
-    if (ObsBridge.selectScene(id)) {
+    if (ObsBridge.selectScene(id, model.sceneTransitionMs)) {
       model.selectedSceneId = id;
       ObsController.refreshSources();
     }

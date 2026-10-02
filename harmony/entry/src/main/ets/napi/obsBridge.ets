@@ -146,9 +146,9 @@ export class ObsBridge {
     }
   }
 
-  static selectScene(id: string): boolean {
+  static selectScene(id: string, durationMs: number = 0): boolean {
     try {
-      return obsBridgeNative.nativeSelectScene(id);
+      return obsBridgeNative.nativeSelectScene(id, durationMs);
     } catch (err) {
       Logger.error('nativeSelectScene failed', Logger.asError(err as Object));
       return false;

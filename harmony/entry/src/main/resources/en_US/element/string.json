@@ -331,6 +331,14 @@
     {
       "name": "text_source_cancel",
       "value": "Cancel"
+    },
+    {
+      "name": "settings_transition",
+      "value": "Scene switch"
+    },
+    {
+      "name": "settings_transition_cut",
+      "value": "Cut"
     }
   ]
 }
