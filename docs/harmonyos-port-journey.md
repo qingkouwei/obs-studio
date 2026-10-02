@@ -292,6 +292,36 @@ current has media and not apply background_task or Resource::AUDIO
 
 **教训**：① 鸿蒙"应用被杀"不一定留崩溃日志，SUSPEND_MANAGER 的 Kill Reason 是唯一线索，排查后台失活先查它；② kill reason 里 "has media" 指的是**音频采集器**——一个音频声明缺失就足以让整条视频录制链陪葬；③ 长时任务不是"后台运行的许可"而是"用户可感知的承诺"，通知栏常驻是设计的一部分，不是打扰。
 
+### 5.7 滤镜黑屏：两个根因 + 一次错误归因（10-02）
+
+**现象**：色彩校正滤镜挂上后预览全黑。
+
+**根因一（数据缺失）**：hilog 抓到 `gs_effect_create_from_file: Null 'file' parameter`——obs-filters 等 7 个插件的 `data/` 目录从未 stage 进 HAP rawfile（cmake rundir 在 OHOS 上根本不组装 share/obs）。effect 文件不存在 → 滤镜渲染链断裂。修 stage-native.sh 自动同步 + Index 加 `ASSET_STAMP` 内容戳强制重解压。
+
+**根因二（默认值缺失）**：桥接层 `obs_source_create_private` 传了 nullptr settings，color_filter 的 opacity 读 `obs_data_get_int` 缺 key 返回 0 → 矩阵乘零 → 全黑。正解是 `obs_get_source_defaults(typeId)`——Qt 前端同款路径，走插件 get_defaults hook（opacity=100→1.0）。
+
+**归因弯路（诚实记录）**：期间预览恰好整体黑屏，先后误判为"Maleoon 驱动坏状态"（glGetError 返回垃圾值 0x26D72A00 + EGL_BAD_NATIVE_WINDOW）并重启设备——A/B 装旧构建同样黑，最终 `XComponent surface created: 2046x43` 一条日志定案：**是我把 SideDocks 固定 400 高挤掉了预览空间**（重启后窗口未最大化走堆叠布局）。教训：黑屏先看 surface 尺寸日志，尺寸正常才轮到渲染链；驱动玄学论要先用"旧构建同样复现"来检验。
+
+**顺带的正确修复**：`EntryAbility` loadContent 后 `window.maximize()`——PC/2in1 桌面软件就该最大化启动，一次性解决堆叠布局、来源面板可达性、自动化坐标漂移三个问题。
+
+### 5.8 相机源：三层叠加 bug 的洋葱（10-02）
+
+**现象**：相机源创建成功、`video output frame start`，但预览与成片全黑。
+
+**第一层（元数据撒谎）**：`plane 0 stride 1 smaller than linesize 1920`——`OH_NativeBuffer_MapPlanes` 对 ImageReceiver 送来的 buffer 报 rowStride=1（对 AVScreenCapture 的 buffer 却是好的，§3.9 家族）。改用 Image Kit 自己的 `OH_ImageNative_GetRowStride`（权威源）。又发现相机 NV12 是**单组件半平面**（GetComponentTypes 返回 1 个），Y 和 CbCr 在同一 buffer 内，色度起点 = stride_y × height。
+
+**第二层（拷贝对了仍黑）**：内容探针证明 CPU 侧数据真实（stride_y=1920、nonzero=2080/2080、采样均值 91≈室内亮度），时间戳探针证明时钟正常（delta -61ms），但画面依旧黑，且合成器每帧刷 `GL_INVALID_FRAMEBUFFER_OPERATION`。
+
+**第三层（GPU 拒绝多平面上传）**：libobs 异步帧把 NV12 上传成 GL_R8 + GL_RG16 纹理，Maleoon GLES 驱动不吃这套（display-capture 之所以正常是因为它走 packed RGBA 路径）。**修复：CPU 端 NV12→RGBA 转换（BT.709 limited-range ×256 整数系数），交给 libobs 已验证的 packed 路径**，1080p30 单帧约 1ms，可忽略。
+
+**验证**：预览显示真实画面（桌面+墙+衣袖）；色彩校正滤镜叠加在相机源上不黑屏（在第二种源类型上二次确认 defaults 修复）；8 秒录制拉回 34MB，像素统计 min=5 max=255 mean=166.6 unique=201——真实内容。
+
+**教训**：① "buffer 元数据撒谎"在鸿蒙是多源的：同一个 MapPlanes 在不同生产者（AVScreenCapture vs ImageReceiver）手里可靠性不同，永远优先用数据生产方自己的 API；② 数据对但画面黑时，把 CPU 域和 GPU 域用探针切开——本案两个探针各排除一半，剩下的合成器 GL 错误就是全部真相。
+
+### 5.9 窗口 Picker：三条官方机制全部接入，卡在一纸 ACL（10-02）
+
+mission-0 模式 Init/Start 成功但系统不弹窗口选择器（"空 missionIDs 自动弹 Picker"的文档推断被真机证伪）。按官方 C API 逐条试：`SetSelectionCallback`（须在启动前注册）+ `StrategyForPickerPopUp(true)`（SetCaptureStrategy 成功但无 Picker）+ `PresentPicker`（Init 后、Start 前后各调一次均返回 OPERATE_NOT_PERMIT=2）。错误码官方释义"未获得必要权限或处于非法状态"——最后嫌疑锁定 **CUSTOM_SCREEN_RECORDING（system_basic，AGC ACL 审批）**：正是权限申请材料里的那一项。代码侧完备，待审批过 + 签名 profile 加上后复测。这是"迁移工作的最后一公里有时不在代码里，在流程里"的活案例。
+
 ## 6. 调试方法论（本项目的可复用资产）
 
 1. **日志先行**：给目标库接上宿主日志（3.0）是一切的前提。
@@ -310,7 +340,8 @@ current has media and not apply background_task or Resource::AUDIO
 | 10-01 下午 | 渲染管线打通（通道绑定）；采集三层修复（Init/Picker/取址）；EGL 窗口引用修复；viewport 修复；**预览黑屏根因（RECTANGLE 撞车）定位并修复，真实桌面画面显示** |
 | 10-01 晚间 | **录制闭环打通**：mp4_output 替换 ffmpeg_muxer；编码线程共享 EGL context；NV12→RGB 色彩修复；**产出可播放 mp4（h264 1080p60 + aac，10.2s，ffprobe+抽帧双验证）**；**RTMP 推流打通**：service 生命周期修复，mediamtx 收流 + HLS 回拉抽帧验证真实画面，3.7 分钟 13544 帧零中断 |
 | 10-01 深夜 | 后台录制实测通过（221s 成片、抽帧真实）；**全部诊断探针清理**（7 文件）后全链路冒烟复验通过；git 基线提交并推送 fork（harmonyos-port 分支） |
-| 下一步 | draft PR 台账 + 小颗粒 PR 拆分；色彩精调；窗口/相机源（~~息屏录制~~ 10-02 已闭环 §5.6） |
+| 10-02 | **W1 滤镜面板 + 多场景切换真机跑通**；**息屏继续录闭环**（长时任务，544s 成片 §5.6）；**color_filter 黑屏双根因修复**（插件 data 进包 + obs_get_source_defaults §5.7）；**相机源三层 bug 修复真机跑通**（§5.8）；最大化启动修复堆叠布局；窗口 Picker 三条机制接入、锁定 ACL 依赖（§5.9） |
+| 下一步 | draft PR 台账 + 小颗粒 PR 拆分；色彩精调；窗口 Picker 待 CUSTOM_SCREEN_RECORDING ACL 审批后复测 |
 
 > 说明：验证机 MatePad Edge 是 Pad/PC 双形态设备，PC 模式即真 PC 形态，此前所有实测（预览/录制/推流/Picker 交互）均在 PC/2in1 模式下完成，不存在"另找真 PC 复测"的遗留项。
 
@@ -319,8 +350,8 @@ current has media and not apply background_task or Resource::AUDIO
 - 色彩管理：GS_BGRA→RGBA 退让 + 8bit canvas 的 sRGB 双重编码（观感大体正常，精调项）
 - 插件加载清单的工程化（SELinux/linker-ns 约束下的体面方案）
 - 诊断探针全链清理（device_draw/attrbuf/uniform/shader dump/canvas 采样/帧计数）
-- 窗口采集、相机源的 Picker/权限流程
-- AGC 受限权限审批材料（CUSTOM_SCREEN_RECORDING）
+- ~~窗口采集、相机源的 Picker/权限流程~~ —— 相机源 10-02 已闭环（§5.8）；窗口 Picker 代码侧完备，卡 CUSTOM_SCREEN_RECORDING ACL 审批（§5.9）
+- AGC 受限权限审批材料（已备好 docs/harmonyos-agc-permission-application.md，待提交审批）
 - rtmp-services 远程更新失败（mbedTLS 证书链，非阻塞，本地 package 兜底）
 
 ## 9. 上游 PR 候选（按可合入性排序）

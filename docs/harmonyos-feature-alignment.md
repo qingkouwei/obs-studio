@@ -33,8 +33,8 @@
 
 ### ❌-A 可补齐（正常工程问题，按优先级）
 
-1. **窗口采集**：AVScreenCapture 支持 OH_CAPTURE_SCREEN + window 模式（`display-capture.c` 已有 window-capture 雏形）；缺 PC/2in1 窗口选择 Picker 流程。
-2. **相机源**：harmony-camera 插件在，缺 Camera Kit 会话 → libobs texture 的 UI 流程与权限。
+1. **窗口采集** —— **代码侧完备，卡在 ACL（10-02）**：window-capture 已对齐 display-capture 帧路径，mission-0（用户选窗）模式跑通 Init/Start；三条官方 Picker 机制（SetSelectionCallback / StrategyForPickerPopUp / PresentPicker）全部接入后仍不弹，PresentPicker 返回 OPERATE_NOT_PERMIT（官方释义=缺权限）。剩余依赖：CUSTOM_SCREEN_RECORDING 受限权限 AGC 审批 + 签名配置（申请材料见 harmonyos-agc-permission-application.md），审批后复测。
+2. ~~相机源~~ —— **已闭环（10-02）**：三层叠加 bug 全修（MapPlanes 对 ImageReceiver buffer 报 stride=1 垃圾值→改用 Image Kit 权威 GetRowStride；NV12 单组件半平面布局；Maleoon GLES 拒绝 libobs 的 GL_R8+GL_RG16 多平面上传→CPU NV12→RGBA 转换）。预览+滤镜叠加+录制成片三重真机验证。
 3. **色准**：8bit sRGB canvas 双重编码（GS_BGRA 退 RGBA 的连带项）→ 线性 canvas 或 sRGB-aware 路径。
 4. **HEVC/AV1 硬编**：OH_VideoEncoder 支持（HDR Vivid 文档证实 HEVC Main10 路径），harmony-vcodec 只做了 H.264。
 5. ~~长时任务规范化~~ —— **已闭环（10-02）**：audioRecording continuous task 接入（LongRunningTask.ets + backgroundModes 声明），息屏录制实测 544s 成片。见 journey §5.6。
