@@ -4,6 +4,7 @@
 #include <util/darray.h>
 #include <util/dstr.h>
 #include <obs-data.h>
+#include <stdlib.h>
 #include "file-updater.h"
 
 #define warn(msg, ...) blog(LOG_WARNING, "%s" msg, info->log_prefix, ##__VA_ARGS__)
@@ -116,6 +117,24 @@ static bool do_http_request(struct update_info *info, const char *url, long *res
 	curl_easy_setopt(info->curl, CURLOPT_FAILONERROR, 1L);
 	curl_easy_setopt(info->curl, CURLOPT_NOSIGNAL, 1L);
 	curl_easy_setopt(info->curl, CURLOPT_ACCEPT_ENCODING, "");
+	/* Bound the connect and the whole transfer. Without a connect timeout,
+	 * a host whose IPv6 route answers ICMPv6 but black-holes TCP/443 (common
+	 * on networks with broken/dropped v6 egress) makes curl sit through the
+	 * full SYN-retry schedule per resolved address — observed at 300 s on
+	 * HarmonyOS before the transfer gave up. A short connect timeout lets
+	 * curl fall through the getaddrinfo list to the working family quickly;
+	 * the transfer timeout is a backstop for a stalled TLS handshake. */
+	curl_easy_setopt(info->curl, CURLOPT_CONNECTTIMEOUT, 10L);
+	curl_easy_setopt(info->curl, CURLOPT_TIMEOUT, 60L);
+	/* Platforms without a build-time CA path (HarmonyOS: no system trust
+	 * store readable from the app sandbox, and libcurl compiled with no
+	 * CURL_CA_BUNDLE default) fail every HTTPS update with "certificate is
+	 * not correctly signed by the trusted CA". Honour the ecosystem-standard
+	 * CURL_CA_BUNDLE variable the host application may point at a shipped
+	 * bundle. */
+	const char *ca_bundle = getenv("CURL_CA_BUNDLE");
+	if (ca_bundle && ca_bundle[0])
+		curl_easy_setopt(info->curl, CURLOPT_CAINFO, ca_bundle);
 	curl_obs_set_revoke_setting(info->curl);
 
 	if (!info->remote_url) {
