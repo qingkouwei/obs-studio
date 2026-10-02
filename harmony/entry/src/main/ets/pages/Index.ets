@@ -205,18 +205,27 @@ struct Index {
         .padding({ left: 12, right: 12 })
         .alignItems(VerticalAlign.Top)
       } else {
-        Column({ space: 8 }) {
-          Column() {
-            PreviewCanvas({ xcomponentId: 'obs-preview-canvas' })
-          }
-          .layoutWeight(1)
-          .width('100%')
-          .constraintSize({ minHeight: 260 })
+        // Stacked layout (window < 1200vp, e.g. not maximized). The fixed
+        // heights below sum to more than a small window, so the whole region
+        // scrolls — otherwise the sources/filter panel is clipped out of
+        // reach and no source can be added. Preview keeps a usable fixed
+        // height rather than being squeezed to a sliver.
+        Scroll() {
+          Column({ space: 8 }) {
+            Column() {
+              PreviewCanvas({ xcomponentId: 'obs-preview-canvas' })
+            }
+            .width('100%')
+            .height(200)
 
-          this.SideDocks()
+            this.SideDocks()
+          }
+          .width('100%')
         }
         .width('100%')
         .layoutWeight(1)
+        .scrollBar(BarState.Auto)
+        .align(Alignment.Top)
         .padding({ left: 12, right: 12 })
       }
 
