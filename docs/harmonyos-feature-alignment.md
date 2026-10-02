@@ -52,6 +52,7 @@
 | 全局热键（低层钩子） | 无系统级全局钩子 | 键盘事件仅在应用窗口聚焦时可达；或用系统入口（小艺/意图）替代"一句话开播" |
 | V8 脚本源（obs-scripting） | 理论可行（进程内 V8 交叉编译）但生态依赖 Qt/python | 远期项 |
 | 多显示器枚举 | 形态不同（外接屏走分布式协同/投屏叙事） | Cast/投屏方向重构 |
+| 键鼠可视化叠加（INPUT_MONITORING） | 权限虽在调试 ACL 里，但**第三方无全局输入消费 API**（SDK 全量检索零引用；AVScreenCapture 无特效注入；addLocalInputEventMonitor 仅本窗）——渲染闭环留在系统录屏管线内 | 系统录屏自带特效做演示层 + OBS 做合成层的组合叙事；详见 harmonyos-input-overlay-research.md |
 
 ## 对齐度估算
 
