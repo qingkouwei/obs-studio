@@ -314,88 +314,132 @@ static int32_t camera_format_to_nativebuffer(Camera_Format format)
 	}
 }
 
-static bool copy_planar_frame(struct obs_source_frame *frame, OH_NativeBuffer *buffer, bool swap_chroma)
+/* Row stride for one component of the image, as reported by the Image Kit
+ * itself. OH_NativeBuffer_MapPlanes() fills rowStride for AVScreenCapture
+ * buffers but returns garbage (stride 1) for ImageReceiver/camera buffers —
+ * the journey §3.9 class of "buffer metadata lies". OH_ImageNative_GetRowStride
+ * is the authoritative source for these frames; fall back to the buffer
+ * config stride, then to the untightened width, if the query fails. */
+static uint32_t image_row_stride(OH_ImageNative *image, OH_NativeBuffer *buffer, uint32_t component_type,
+				 uint32_t fallback)
 {
-	OH_NativeBuffer_Planes planes = {0};
-	void *addr = NULL;
+	int32_t stride = 0;
+	if (OH_ImageNative_GetRowStride(image, component_type, &stride) == IMAGE_SUCCESS &&
+	    (uint32_t)stride >= fallback)
+		return (uint32_t)stride;
 
-	if (OH_NativeBuffer_MapPlanes(buffer, &addr, &planes) != 0) {
-		blog(LOG_ERROR, LOG_PREFIX "failed to map planar buffer");
+	OH_NativeBuffer_Config cfg = {0};
+	OH_NativeBuffer_GetConfig(buffer, &cfg);
+	if (cfg.stride >= (int32_t)fallback)
+		return (uint32_t)cfg.stride;
+
+	return fallback;
+}
+
+/* NV12 -> RGBA on the CPU. libobs' async multi-plane path uploads NV12 as
+ * GL_R8 + GL_RG16 textures, which the Maleoon GLES driver rejects during the
+ * colour-conversion draw (GL_INVALID_FRAMEBUFFER_OPERATION per frame -> the
+ * source renders black). The packed RGBA upload path is the one proven on
+ * this device by display-capture, so convert here and hand libobs a
+ * VIDEO_FORMAT_RGBA frame. BT.709 limited-range coefficients scaled x256;
+ * the output is flagged full-range because we expand by hand. */
+static bool copy_nv12_to_rgba(struct obs_source_frame *frame, OH_ImageNative *image, uint32_t component_type,
+			      bool swap_chroma)
+{
+	OH_NativeBuffer *buffer = NULL;
+	if (OH_ImageNative_GetByteBuffer(image, component_type, &buffer) != IMAGE_SUCCESS || buffer == NULL) {
+		blog(LOG_ERROR, LOG_PREFIX "GetByteBuffer failed for NV12 component");
 		return false;
 	}
 
-	if (planes.planeCount < 2) {
-		blog(LOG_ERROR, LOG_PREFIX "unexpected plane count %" PRIu32 " for planar format", planes.planeCount);
-		OH_NativeBuffer_Unmap(buffer);
+	void *addr = NULL;
+	if (OH_NativeBuffer_Map(buffer, &addr) != 0 || addr == NULL) {
+		blog(LOG_ERROR, LOG_PREFIX "failed to map NV12 buffer");
 		return false;
 	}
 
 	const uint8_t *base = (const uint8_t *)addr;
+	const uint32_t stride_y = image_row_stride(image, buffer, component_type, frame->width);
+	const uint8_t *chroma = base + (size_t)stride_y * frame->height;
 
-	for (uint32_t plane = 0; plane < 2; plane++) {
-		const uint8_t *src = base + planes.planes[plane].offset;
-		const uint32_t src_row_bytes = planes.planes[plane].rowStride;
-		const uint32_t plane_height = (plane == 0) ? frame->height : frame->height / 2;
+	for (uint32_t row = 0; row + 1 < frame->height; row += 2) {
+		const uint8_t *y0 = base + (size_t)row * stride_y;
+		const uint8_t *y1 = base + (size_t)(row + 1) * stride_y;
+		const uint8_t *cv = chroma + (size_t)(row / 2) * stride_y;
+		uint8_t *o0 = frame->data[0] + (size_t)row * frame->linesize[0];
+		uint8_t *o1 = frame->data[0] + (size_t)(row + 1) * frame->linesize[0];
 
-		if (src_row_bytes < frame->linesize[plane]) {
-			blog(LOG_ERROR, LOG_PREFIX "plane %" PRIu32 " stride %u smaller than linesize %u", plane,
-			     src_row_bytes, frame->linesize[plane]);
-			OH_NativeBuffer_Unmap(buffer);
-			return false;
-		}
+		for (uint32_t col = 0; col + 1 < frame->width; col += 2) {
+			int32_t cb = (int32_t)(swap_chroma ? cv[col + 1] : cv[col]) - 128;
+			int32_t cr = (int32_t)(swap_chroma ? cv[col] : cv[col + 1]) - 128;
 
-		if (plane == 1 && swap_chroma) {
-			for (uint32_t row = 0; row < plane_height; row++) {
-				uint8_t *dst = frame->data[plane] + (size_t)row * frame->linesize[plane];
-				const uint8_t *src_row = src + (size_t)row * src_row_bytes;
-				for (uint32_t col = 0; col + 1 < frame->linesize[plane]; col += 2) {
-					dst[col] = src_row[col + 1];
-					dst[col + 1] = src_row[col];
-				}
+			for (int sub = 0; sub < 4; sub++) {
+				const uint32_t sx = col + (sub & 1);
+				const uint8_t *ys = (sub & 2) ? y1 : y0;
+				int32_t yy = (int32_t)ys[sx];
+				int32_t yc = 298 * (yy - 16);
+				int32_t r = (yc + 459 * cr) >> 8;
+				int32_t g = (yc - 55 * cb - 137 * cr) >> 8;
+				int32_t b = (yc + 541 * cb) >> 8;
+				uint8_t *px = ((sub & 2) ? o1 : o0) + (size_t)sx * 4;
+				px[0] = (uint8_t)(r < 0 ? 0 : r > 255 ? 255 : r);
+				px[1] = (uint8_t)(g < 0 ? 0 : g > 255 ? 255 : g);
+				px[2] = (uint8_t)(b < 0 ? 0 : b > 255 ? 255 : b);
+				px[3] = 0xFF;
 			}
-		} else {
-			for (uint32_t row = 0; row < plane_height; row++)
-				memcpy(frame->data[plane] + (size_t)row * frame->linesize[plane],
-				       src + (size_t)row * src_row_bytes, frame->linesize[plane]);
 		}
 	}
 
+	/* Odd bottom row (height not divisible by 2): duplicate last line. */
+	if (frame->height & 1) {
+		const uint8_t *src = frame->data[0] + (size_t)(frame->height - 2) * frame->linesize[0];
+		memcpy(frame->data[0] + (size_t)(frame->height - 1) * frame->linesize[0], src, frame->linesize[0]);
+	}
+
+	frame->full_range = true;
 	OH_NativeBuffer_Unmap(buffer);
 	return true;
 }
 
-static bool copy_packed_frame(struct obs_source_frame *frame, OH_NativeBuffer *buffer)
+static bool copy_packed_frame(struct obs_source_frame *frame, OH_ImageNative *image, uint32_t component_type)
 {
-	OH_NativeBuffer_Planes planes = {0};
-	void *addr = NULL;
+	OH_NativeBuffer *buffer = NULL;
+	if (OH_ImageNative_GetByteBuffer(image, component_type, &buffer) != IMAGE_SUCCESS || buffer == NULL) {
+		blog(LOG_ERROR, LOG_PREFIX "GetByteBuffer failed for packed component");
+		return false;
+	}
 
-	if (OH_NativeBuffer_MapPlanes(buffer, &addr, &planes) != 0) {
+	void *addr = NULL;
+	if (OH_NativeBuffer_Map(buffer, &addr) != 0 || addr == NULL) {
 		blog(LOG_ERROR, LOG_PREFIX "failed to map packed buffer");
 		return false;
 	}
 
-	if (planes.planeCount < 1) {
-		blog(LOG_ERROR, LOG_PREFIX "unexpected plane count %" PRIu32 " for packed format", planes.planeCount);
-		OH_NativeBuffer_Unmap(buffer);
-		return false;
-	}
+	const uint8_t *src = (const uint8_t *)addr;
+	const uint32_t src_row_bytes = image_row_stride(image, buffer, component_type, frame->linesize[0]);
 
-	const uint8_t *src = (const uint8_t *)addr + planes.planes[0].offset;
-	const uint32_t src_row_bytes = planes.planes[0].rowStride;
-
+	bool ok = true;
 	if (src_row_bytes < frame->linesize[0]) {
 		blog(LOG_ERROR, LOG_PREFIX "buffer stride %u smaller than frame linesize %u", src_row_bytes,
 		     frame->linesize[0]);
-		OH_NativeBuffer_Unmap(buffer);
-		return false;
+		ok = false;
+	} else {
+		for (uint32_t row = 0; row < frame->height; row++)
+			memcpy(frame->data[0] + (size_t)row * frame->linesize[0], src + (size_t)row * src_row_bytes,
+			       frame->linesize[0]);
+		/* Force opaque alpha (premultiplied-blend fix, journey §3.10)
+		 * for formats that carry an alpha byte. */
+		if (frame->format == VIDEO_FORMAT_RGBA || frame->format == VIDEO_FORMAT_BGRA) {
+			for (uint32_t row = 0; row < frame->height; row++) {
+				uint8_t *px = frame->data[0] + (size_t)row * frame->linesize[0];
+				for (uint32_t col = 3; col < frame->width * 4; col += 4)
+					px[col] = 0xFF;
+			}
+		}
 	}
 
-	for (uint32_t row = 0; row < frame->height; row++)
-		memcpy(frame->data[0] + (size_t)row * frame->linesize[0], src + (size_t)row * src_row_bytes,
-		       frame->linesize[0]);
-
 	OH_NativeBuffer_Unmap(buffer);
-	return true;
+	return ok;
 }
 
 static void camera_capture_on_image_arrive(OH_ImageReceiverNative *receiver, void *user_data)
@@ -427,7 +471,6 @@ static void camera_capture_on_image_arrive(OH_ImageReceiverNative *receiver, voi
 
 	uint32_t *component_types = NULL;
 	size_t type_size = 0;
-	OH_NativeBuffer *buffer = NULL;
 
 	if (OH_ImageNative_GetComponentTypes(image, NULL, &type_size) != IMAGE_SUCCESS || type_size == 0) {
 		blog(LOG_WARNING, LOG_PREFIX "GetComponentTypes failed");
@@ -437,11 +480,6 @@ static void camera_capture_on_image_arrive(OH_ImageReceiverNative *receiver, voi
 	component_types = bmalloc(type_size * sizeof(uint32_t));
 	if (OH_ImageNative_GetComponentTypes(image, &component_types, &type_size) != IMAGE_SUCCESS) {
 		blog(LOG_WARNING, LOG_PREFIX "GetComponentTypes (fill) failed");
-		goto image_done;
-	}
-
-	if (OH_ImageNative_GetByteBuffer(image, component_types[0], &buffer) != IMAGE_SUCCESS || buffer == NULL) {
-		blog(LOG_WARNING, LOG_PREFIX "GetByteBuffer failed");
 		goto image_done;
 	}
 
@@ -460,13 +498,15 @@ static void camera_capture_on_image_arrive(OH_ImageReceiverNative *receiver, voi
 		goto image_done;
 	}
 
-	struct obs_source_frame *frame = obs_source_frame_create(format, size.width, size.height);
+	/* NV12 is converted to RGBA on the CPU (see copy_nv12_to_rgba), so the
+	 * frame handed to libobs is always a packed format. */
+	const enum video_format out_format = (format == VIDEO_FORMAT_NV12) ? VIDEO_FORMAT_RGBA : format;
+	struct obs_source_frame *frame = obs_source_frame_create(out_format, size.width, size.height);
 	if (frame == NULL)
 		goto image_done;
 
-	const bool is_planar = (format == VIDEO_FORMAT_NV12);
-	const bool copied = is_planar ? copy_planar_frame(frame, buffer, swap_chroma)
-				      : copy_packed_frame(frame, buffer);
+	const bool copied = (format == VIDEO_FORMAT_NV12) ? copy_nv12_to_rgba(frame, image, component_types[0], swap_chroma)
+							  : copy_packed_frame(frame, image, component_types[0]);
 
 	/* Image receiver timestamps are CLOCK_MONOTONIC nanoseconds, the same
 	 * clock os_gettime_ns() uses, so they can be passed through directly. */
