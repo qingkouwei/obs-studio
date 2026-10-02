@@ -763,8 +763,19 @@ napi_value NativeInit(napi_env env, napi_callback_info info)
 
     // Audio capture tracks are HarmonyOS-native and live in BOTH modes, so
     // the mixer meters show real signal even before the core port lands.
-    StartTrack(g_desktopTrack);
-    StartTrack(g_micTrack);
+    /* NOT on the calling (main) thread: OH_AudioCapturer_Start is a
+     * synchronous IPC into audio_server, and after a force-stop churn the
+     * server serialises it behind the dying session's teardown — measured
+     * blocking the main thread 20+ s (THREAD_BLOCK_6S → kill). The tracks'
+     * state is atomic and the ArkTS mixer polls it, so a detached starter
+     * thread costs the UI nothing. (ANR investigation 10-03: the old
+     * "obs_reset_video blocks" attribution was wrong — the block lands
+     * right after the OHAudioCapturer callback-setup lines, before
+     * "mic capturer start result" ever prints.) */
+    std::thread([] {
+        StartTrack(g_desktopTrack);
+        StartTrack(g_micTrack);
+    }).detach();
     return CreateBool(env, coreOk);
 }
 
