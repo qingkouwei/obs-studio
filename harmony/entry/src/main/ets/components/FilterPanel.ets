@@ -26,6 +26,14 @@ export struct FilterPanel {
         return $r('app.string.filter_crop');
       case 'sharpness_filter':
         return $r('app.string.filter_sharpness');
+      case 'gain_filter':
+        return $r('app.string.filter_gain');
+      case 'noise_gate_filter':
+        return $r('app.string.filter_noise_gate');
+      case 'noise_suppress_filter':
+        return $r('app.string.filter_noise_suppress');
+      case 'late_delay_filter':
+        return $r('app.string.filter_late_delay');
       default:
         return typeId;
     }

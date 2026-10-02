@@ -1216,6 +1216,12 @@ napi_value NativeGetFilterTypes(napi_env env, napi_callback_info /*info*/)
      * creation both go through obs_source_create_private. */
     static const char *const kCandidateFilters[] = {
         "color_filter", "scale_filter", "crop_filter", "sharpness_filter",
+        /* audio: obs-filters registers these unconditionally at module load;
+         * the create_private probe below still guards against a partial load.
+         * libobs lets any source carry an audio filter — on a video-only
+         * source it simply never processes audio, so no runtime guard needed
+         * here (the desktop UI hides them instead; tracked as a polish item). */
+        "gain_filter", "noise_gate_filter", "noise_suppress_filter", "late_delay_filter",
     };
     uint32_t index = 0;
     for (const char *fid : kCandidateFilters) {

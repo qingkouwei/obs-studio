@@ -339,6 +339,22 @@
     {
       "name": "settings_transition_cut",
       "value": "Cut"
+    },
+    {
+      "name": "filter_gain",
+      "value": "Gain"
+    },
+    {
+      "name": "filter_noise_gate",
+      "value": "Noise Gate"
+    },
+    {
+      "name": "filter_noise_suppress",
+      "value": "Noise Suppression"
+    },
+    {
+      "name": "filter_late_delay",
+      "value": "Sync Offset"
     }
   ]
 }
