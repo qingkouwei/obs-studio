@@ -554,6 +554,10 @@ bool WireOutputEncoders(obs_output_t *output, int64_t videoKbps, int64_t audioKb
 
 std::mutex g_sceneMutex;
 std::map<std::string, obs_scene_t *> g_scenes; // scene source UUID -> scene
+/* Private fade wrapper that owns the program channel during scene
+ * transitions (created lazily in NativeSelectScene; guarded by
+ * g_sceneMutex). */
+obs_source_t *g_programTransition = nullptr;
 
 struct SceneItemEnumCtx {
     int64_t wantedId = -1;
@@ -791,6 +795,11 @@ void ShutdownCore()
     }
     {
         std::lock_guard<std::mutex> lock(g_sceneMutex);
+        if (g_programTransition != nullptr) {
+            obs_transition_clear(g_programTransition);
+            obs_source_release(g_programTransition);
+            g_programTransition = nullptr;
+        }
         for (auto &entry : g_scenes) {
             obs_source_remove(obs_scene_get_source(entry.second));
             obs_scene_release(entry.second);
@@ -1057,20 +1066,30 @@ napi_value NativeSetSourceVisible(napi_env env, napi_callback_info info)
 }
 
 /* Switch the program channel (channel 0) to another registered scene.
- * This is the "cut" the desktop frontend performs when you click a scene in
- * the scene list; without it every created scene stays bound until the next
- * create (see NativeCreateScene). */
+ * Without a transition this is the "cut" the desktop frontend performs when
+ * you click a scene in the scene list. With a duration > 0 it runs through
+ * libobs's transition machinery: the program channel is taken over (once,
+ * lazily) by a private fade_transition wrapper source — obs_transition_*
+ * refuses any source whose type is not OBS_SOURCE_TYPE_TRANSITION, so the
+ * scene sources themselves cannot host the transition. Seed the wrapper
+ * with the current channel source, bind the wrapper to channel 0, then
+ * obs_transition_start AUTO to the target; the video thread ticks it and
+ * swaps A/B internally. duration <= 0 keeps the plain cut path. */
 napi_value NativeSelectScene(napi_env env, napi_callback_info info)
 {
-    size_t argc = 1;
-    napi_value args[1] = {nullptr};
+    size_t argc = 2;
+    napi_value args[2] = {nullptr, nullptr};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
     std::string id;
     if (argc < 1 || !GetStringArg(env, args[0], id)) {
-        return ThrowError(env, "nativeSelectScene(id): argument must be a string");
+        return ThrowError(env, "nativeSelectScene(id, durationMs?): id must be a string");
+    }
+    int64_t durationMs = 0;
+    if (argc >= 2) {
+        napi_get_value_int64(env, args[1], &durationMs);
     }
 #ifndef HAVE_LIBOBS
-    (void)id;
+    (void)id; (void)durationMs;
     return ThrowCoreNotLinked(env);
 #else
     std::lock_guard<std::mutex> lock(g_sceneMutex);
@@ -1078,7 +1097,35 @@ napi_value NativeSelectScene(napi_env env, napi_callback_info info)
     if (it == g_scenes.end()) {
         return CreateBool(env, false);
     }
-    obs_set_output_source(0, obs_scene_get_source(it->second));
+    obs_source_t *target = obs_scene_get_source(it->second);
+
+    if (durationMs <= 0) {
+        obs_set_output_source(0, target);
+        return CreateBool(env, true);
+    }
+
+    if (g_programTransition == nullptr) {
+        /* One persistent wrapper owned by us; the channel holds its own
+         * reference once bound, so this create-ref stays for our lifetime
+         * (released in ShutdownCore). */
+        g_programTransition = obs_source_create_private("fade_transition", "harmony_scene_transition", nullptr);
+        if (g_programTransition == nullptr) {
+            OH_LOG_WARN(LOG_APP, "fade_transition source unavailable, falling back to cut");
+            obs_set_output_source(0, target);
+            return CreateBool(env, true);
+        }
+        /* Seed with whatever owns channel 0 right now so the fade has a
+         * real "from" picture (obs_get_output_source addrefs). */
+        obs_source_t *current = obs_get_output_source(0);
+        obs_transition_set(g_programTransition, current);
+        obs_source_release(current);
+        obs_set_output_source(0, g_programTransition);
+    }
+
+    const bool started = obs_transition_start(g_programTransition, OBS_TRANSITION_MODE_AUTO,
+                                              (uint32_t)durationMs, target);
+    OH_LOG_INFO(LOG_APP, "scene transition to '%{public}s': %{public}s (%{public}lld ms)", id.c_str(),
+                started ? "started" : "noop/same", (long long)durationMs);
     return CreateBool(env, true);
 #endif
 }

@@ -17,6 +17,7 @@ export struct SettingsPanel {
   private resolutions: string[] = ['1280x720', '1920x1080', '2560x1440', '3840x2160'];
   private fpsOptions: number[] = [30, 60];
   private codecOptions: string[] = ['H.264', 'HEVC'];
+  private transitionOptions: number[] = [0, 300, 600, 1000];
 
   private codecIndex(): number {
     return this.model.setVideoCodec === 'hevc' ? 1 : 0;
@@ -136,6 +137,31 @@ export struct SettingsPanel {
         .onClick(() => {
           ObsController.applyVideoSettings();
         })
+
+      Row({ space: 8 }) {
+        Text($r('app.string.settings_transition'))
+          .fontSize(13)
+          .fontColor($r('app.color.obs_text_secondary'))
+          .width(110)
+        Row({ space: 8 }) {
+          ForEach(this.transitionOptions, (ms: number) => {
+            Button(ms === 0 ? $r('app.string.settings_transition_cut') : `${ms}ms`)
+              .type(ButtonType.Normal)
+              .fontSize(12)
+              .height(28)
+              .fontColor($r('app.color.obs_text_primary'))
+              .backgroundColor(this.model.sceneTransitionMs === ms ?
+              $r('app.color.obs_accent') : $r('app.color.obs_panel_border'))
+              .borderRadius(4)
+              .onClick(() => {
+                this.model.sceneTransitionMs = ms;
+                ObsController.saveSettings();
+              })
+          }, (ms: number) => `${ms}`)
+        }
+        .layoutWeight(1)
+      }
+      .width('100%')
       if (this.model.stats.recording || this.model.stats.streaming) {
         Text($r('app.string.settings_output_busy'))
           .fontSize(11)
