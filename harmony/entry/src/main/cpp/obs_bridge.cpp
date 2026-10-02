@@ -581,6 +581,30 @@ obs_sceneitem_t *FindSceneItemById(int64_t itemId)
     return nullptr;
 }
 
+/* Shared obs_video_info construction for NativeInit and
+ * NativeResetVideo (settings panel). Zero width/height/fps keeps the
+ * factory defaults (1080p60). Output dimensions track base dimensions —
+ * the port never used the downscale path. */
+void BuildVideoInfo(struct obs_video_info *ovi, int width, int height, int fps)
+{
+    // The graphics module is the ported libobs OpenGL/EGL backend for
+    // HarmonyOS; its EGL surfaces are created on XComponent NativeWindows
+    // (see xcomponent_surface.cpp).
+    ovi->graphics_module = "libobs-opengl";
+    ovi->fps_num = fps > 0 ? fps : 60;
+    ovi->fps_den = 1;
+    ovi->base_width = width > 0 ? width : 1920;
+    ovi->base_height = height > 0 ? height : 1080;
+    ovi->output_width = ovi->base_width;
+    ovi->output_height = ovi->base_height;
+    ovi->output_format = VIDEO_FORMAT_NV12;
+    ovi->adapter = 0;
+    ovi->gpu_conversion = true;
+    ovi->colorspace = VIDEO_CS_709;
+    ovi->range = VIDEO_RANGE_DEFAULT;
+    ovi->scale_type = OBS_SCALE_BILINEAR;
+}
+
 #endif // HAVE_LIBOBS
 
 } // namespace (anonymous helpers above; entry points below are obs_bridge::)
@@ -690,22 +714,7 @@ napi_value NativeInit(napi_env env, napi_callback_info info)
         obs_log_loaded_modules();
 
         struct obs_video_info ovi = {};
-        // The graphics module is the ported libobs OpenGL/EGL backend for
-        // HarmonyOS; its EGL surfaces are created on XComponent NativeWindows
-        // (see xcomponent_surface.cpp).
-        ovi.graphics_module = "libobs-opengl";
-        ovi.fps_num = 60;
-        ovi.fps_den = 1;
-        ovi.base_width = 1920;
-        ovi.base_height = 1080;
-        ovi.output_width = 1920;
-        ovi.output_height = 1080;
-        ovi.output_format = VIDEO_FORMAT_NV12;
-        ovi.adapter = 0;
-        ovi.gpu_conversion = true;
-        ovi.colorspace = VIDEO_CS_709;
-        ovi.range = VIDEO_RANGE_DEFAULT;
-        ovi.scale_type = OBS_SCALE_BILINEAR;
+        BuildVideoInfo(&ovi, 0, 0, 0);
         const int videoRc = obs_reset_video(&ovi);
         if (videoRc != OBS_VIDEO_SUCCESS) {
             OH_LOG_ERROR(LOG_APP, "obs_reset_video failed: %{public}d "
@@ -1054,6 +1063,64 @@ napi_value NativeSelectScene(napi_env env, napi_callback_info info)
     }
     obs_set_output_source(0, obs_scene_get_source(it->second));
     return CreateBool(env, true);
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// Video settings (settings panel): reset the canvas at a new resolution/fps.
+// obs_reset_video re-creates the shared context and every XComponent EGL
+// surface is rebuilt against it by the surface callbacks, so calling it while
+// outputs are live is the same operation the desktop frontend performs from
+// Settings → Video. Refuse while recording/streaming (libobs would drop the
+// encoder surfaces mid-file; the desktop UI blocks the same way).
+// ---------------------------------------------------------------------------
+
+napi_value NativeGetVideoInfo(napi_env env, napi_callback_info /*info*/)
+{
+    napi_value obj = nullptr;
+    napi_create_object(env, &obj);
+#ifndef HAVE_LIBOBS
+    SetProperty(env, obj, "width", CreateInt32(env, 1920));
+    SetProperty(env, obj, "height", CreateInt32(env, 1080));
+    SetProperty(env, obj, "fps", CreateInt32(env, 60));
+#else
+    struct obs_video_info ovi;
+    if (obs_get_video_info(&ovi)) {
+        SetProperty(env, obj, "width", CreateInt32(env, (int32_t)ovi.base_width));
+        SetProperty(env, obj, "height", CreateInt32(env, (int32_t)ovi.base_height));
+        SetProperty(env, obj, "fps",
+                    CreateInt32(env, ovi.fps_den > 0 ? (int32_t)(ovi.fps_num / ovi.fps_den) : 0));
+    }
+#endif
+    return obj;
+}
+
+napi_value NativeResetVideo(napi_env env, napi_callback_info info)
+{
+    size_t argc = 3;
+    napi_value args[3] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    int32_t width = 0, height = 0, fps = 0;
+    if (argc < 3 || napi_get_value_int32(env, args[0], &width) != napi_ok ||
+        napi_get_value_int32(env, args[1], &height) != napi_ok ||
+        napi_get_value_int32(env, args[2], &fps) != napi_ok) {
+        return ThrowError(env, "nativeResetVideo(width, height, fps): three integers required");
+    }
+#ifndef HAVE_LIBOBS
+    (void)width; (void)height; (void)fps;
+    return ThrowCoreNotLinked(env);
+#else
+    if (width < 320 || height < 240 || width > 7680 || height > 4320 || (width % 2) || (height % 2)) {
+        return CreateBool(env, false);
+    }
+    if (fps < 10 || fps > 120) {
+        return CreateBool(env, false);
+    }
+    struct obs_video_info ovi = {};
+    BuildVideoInfo(&ovi, width, height, fps);
+    const int rc = obs_reset_video(&ovi);
+    OH_LOG_INFO(LOG_APP, "nativeResetVideo %{public}dx%{public}d@%{public}d rc=%{public}d", width, height, fps, rc);
+    return CreateBool(env, rc == OBS_VIDEO_SUCCESS);
 #endif
 }
 

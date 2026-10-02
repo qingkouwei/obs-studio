@@ -76,6 +76,13 @@ export interface NativeFilterEntry {
   enabled: boolean;
 }
 
+/** Canvas geometry reported by nativeGetVideoInfo / accepted by nativeResetVideo. */
+export interface NativeVideoInfo {
+  width: number;
+  height: number;
+  fps: number;
+}
+
 export interface ObsBridgeNative {
   /** Start libobs (when linked) and the HarmonyOS audio capture tracks. */
   /**
@@ -106,6 +113,11 @@ export interface ObsBridgeNative {
   nativeSetSourceVisible(id: string, visible: boolean): boolean;
   /** Bind the program channel (channel 0) to another scene — the "scene cut". */
   nativeSelectScene(id: string): boolean;
+
+  /** Current canvas geometry (base size + fps). */
+  nativeGetVideoInfo(): NativeVideoInfo;
+  /** Re-create the canvas at a new resolution/fps; false when rejected. */
+  nativeResetVideo(width: number, height: number, fps: number): boolean;
 
   /** Filter type ids actually registered by the staged obs-filters plugin. */
   nativeGetFilterTypes(): string[];

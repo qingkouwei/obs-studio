@@ -3,6 +3,7 @@ import { NativeAudioTrack, NativeFilterEntry, NativeOutputLevel, NativeSceneEntr
 import { ObsBridge, SystemAudioCapability } from '../napi/obsBridge';
 import { Logger } from '../common/Logger';
 import { LongRunningTask } from '../common/LongRunningTask';
+import { ObsSettings, SettingsStore } from '../common/SettingsStore';
 import { common } from '@kit.AbilityKit';
 
 /**
@@ -146,11 +147,20 @@ export class ObsAppState {
   @Trace connectionState: ConnectionState = ConnectionState.Idle;
   @Trace systemAudio: SystemAudioStatus = new SystemAudioStatus();
 
-  /** Editable RTMP target (a full settings dialog replaces this later). */
+  /** Editable RTMP target — mirrored into the settings panel and persisted. */
   @Trace streamingServer: string = 'rtmp://192.168.31.19:1935/live';
   @Trace streamingKey: string = 'obs-test';
   /** Filled with a sandbox path at init time; user can change it later. */
   @Trace recordingPath: string = '';
+
+  /** Settings panel mirror (persisted via SettingsStore on save). */
+  @Trace setVideoWidth: number = 1920;
+  @Trace setVideoHeight: number = 1080;
+  @Trace setVideoFps: number = 60;
+  @Trace setRecordVideoKbps: number = 10000;
+  @Trace setRecordAudioKbps: number = 192;
+  @Trace setStreamVideoKbps: number = 2500;
+  @Trace setStreamAudioKbps: number = 160;
 
   @Trace sceneNameCounter: number = 1;
   @Trace sourceNameCounter: number = 1;
@@ -197,6 +207,78 @@ export class ObsController {
     ObsController.refreshScenes();
     if (coreOk && model.scenes.length === 0) {
       ObsController.createScene(defaultSceneName);
+    }
+    if (coreOk && context) {
+      ObsController.loadSettings(context);
+    }
+  }
+
+  /**
+   * Restore persisted settings; the canvas geometry additionally applies
+   * itself (nativeResetVideo) when it differs from the core's boot default.
+   */
+  static async loadSettings(context: common.UIAbilityContext): Promise<void> {
+    try {
+      const model = ObsController.model;
+      const s = await SettingsStore.load(context);
+      Logger.info(`settings loaded: ${s.videoWidth}x${s.videoHeight}@${s.videoFps}`);
+      model.setVideoWidth = s.videoWidth;
+      model.setVideoHeight = s.videoHeight;
+      model.setVideoFps = s.videoFps;
+      model.setRecordVideoKbps = s.recordVideoKbps;
+      model.setRecordAudioKbps = s.recordAudioKbps;
+      model.setStreamVideoKbps = s.streamVideoKbps;
+      model.setStreamAudioKbps = s.streamAudioKbps;
+      model.streamingServer = s.streamingServer;
+      model.streamingKey = s.streamingKey;
+
+      const current = ObsBridge.getVideoInfo();
+      if (current.width !== s.videoWidth || current.height !== s.videoHeight || current.fps !== s.videoFps) {
+        if (ObsBridge.resetVideo(s.videoWidth, s.videoHeight, s.videoFps)) {
+          Logger.info(`video settings restored: ${s.videoWidth}x${s.videoHeight}@${s.videoFps}`);
+        } else {
+          Logger.warn(`resetVideo ${s.videoWidth}x${s.videoHeight}@${s.videoFps} rejected, keeping ${current.width}x${current.height}@${current.fps}`);
+        }
+      } else {
+        Logger.info('loadSettings: canvas already matches persisted geometry');
+      }
+    } catch (err) {
+      Logger.error('loadSettings crashed', Logger.asError(err as Object));
+    }
+  }
+
+  /** Persist the current settings mirror. */
+  static saveSettings(): void {
+    const model = ObsController.model;
+    if (!ObsController.appContext) {
+      return;
+    }
+    const s = new ObsSettings();
+    s.videoWidth = model.setVideoWidth;
+    s.videoHeight = model.setVideoHeight;
+    s.videoFps = model.setVideoFps;
+    s.recordVideoKbps = model.setRecordVideoKbps;
+    s.recordAudioKbps = model.setRecordAudioKbps;
+    s.streamVideoKbps = model.setStreamVideoKbps;
+    s.streamAudioKbps = model.setStreamAudioKbps;
+    s.streamingServer = model.streamingServer;
+    s.streamingKey = model.streamingKey;
+    SettingsStore.save(ObsController.appContext, s);
+  }
+
+  /** Apply the canvas geometry from the settings panel. */
+  static applyVideoSettings(): void {
+    const model = ObsController.model;
+    if (model.stats.recording || model.stats.streaming) {
+      model.bridgeNotice = $r('app.string.settings_output_busy');
+      return;
+    }
+    if (ObsBridge.resetVideo(model.setVideoWidth, model.setVideoHeight, model.setVideoFps)) {
+      Logger.info(`canvas reset: ${model.setVideoWidth}x${model.setVideoHeight}@${model.setVideoFps}`);
+      ObsController.saveSettings();
+      model.bridgeNotice = null;
+    } else {
+      model.bridgeNotice = $r('app.string.notice_reset_video_fail');
     }
   }
 
@@ -462,6 +544,8 @@ export class ObsController {
     const config = new StreamingConfig();
     config.server = model.streamingServer;
     config.key = model.streamingKey;
+    config.videoBitrateKbps = model.setStreamVideoKbps;
+    config.audioBitrateKbps = model.setStreamAudioKbps;
     model.connectionState = ConnectionState.Starting;
     const started = ObsBridge.startStreaming(JSON.stringify(config));
     if (started) {
@@ -493,6 +577,8 @@ export class ObsController {
     }
     const config = new RecordingConfig();
     config.path = model.recordingPath;
+    config.videoBitrateKbps = model.setRecordVideoKbps;
+    config.audioBitrateKbps = model.setRecordAudioKbps;
     const started = ObsBridge.startRecording(JSON.stringify(config));
     if (started) {
       // Optimistic: the stats thread may not have started pushing yet, and

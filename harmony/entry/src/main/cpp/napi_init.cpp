@@ -69,6 +69,9 @@ napi_value Init(napi_env env, napi_value exports)
         DECLARE_NAPI_FUNCTION("nativeRemoveSource", NativeRemoveSource),
         DECLARE_NAPI_FUNCTION("nativeSetSourceVisible", NativeSetSourceVisible),
         DECLARE_NAPI_FUNCTION("nativeSelectScene", NativeSelectScene),
+        // Video settings
+        DECLARE_NAPI_FUNCTION("nativeGetVideoInfo", NativeGetVideoInfo),
+        DECLARE_NAPI_FUNCTION("nativeResetVideo", NativeResetVideo),
         // Filters
         DECLARE_NAPI_FUNCTION("nativeGetFilterTypes", NativeGetFilterTypes),
         DECLARE_NAPI_FUNCTION("nativeGetFilters", NativeGetFilters),

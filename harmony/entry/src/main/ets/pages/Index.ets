@@ -9,6 +9,7 @@ import { SourceList } from '../components/SourceList';
 import { FilterPanel } from '../components/FilterPanel';
 import { AudioMixer } from '../components/AudioMixer';
 import { TransportBar } from '../components/TransportBar';
+import { SettingsPanel } from '../components/SettingsPanel';
 
 /**
  * Version stamp for the rawfile extraction cache. Bumping the bundle's
@@ -56,6 +57,7 @@ function resolveBundleVersion(): string {
 struct Index {
   @Local model: ObsAppState = ObsAppState.getInstance();
   @Local isLargeScreen: boolean = true;
+  @Local settingsShown: boolean = false;
   private levelTimerId: number = -1;
 
   aboutToAppear(): void {
@@ -127,6 +129,16 @@ struct Index {
         .fontColor(this.model.coreReady ?
         $r('app.color.obs_meter_ok') : $r('app.color.obs_meter_warn'))
       Blank()
+      Button($r('app.string.settings_title'))
+        .type(ButtonType.Normal)
+        .fontSize(12)
+        .height(28)
+        .fontColor($r('app.color.obs_text_primary'))
+        .backgroundColor($r('app.color.obs_panel_border'))
+        .borderRadius(4)
+        .onClick(() => {
+          this.settingsShown = true;
+        })
       Text($r('app.string.app_subtitle'))
         .fontSize(11)
         .fontColor($r('app.color.obs_text_secondary'))
@@ -246,5 +258,23 @@ struct Index {
     .width('100%')
     .height('100%')
     .backgroundColor($r('app.color.obs_background'))
+    .bindSheet($$this.settingsShown,
+      this.SettingsSheet(),
+      {
+        height: SheetSize.MEDIUM,
+        dragBar: true,
+        showClose: true,
+        backgroundColor: $r('app.color.obs_background')
+      })
+  }
+
+  @Builder
+  SettingsSheet() {
+    SettingsPanel({
+      model: this.model,
+      onVisibleChange: (v: boolean) => {
+        this.settingsShown = v;
+      }
+    })
   }
 }
