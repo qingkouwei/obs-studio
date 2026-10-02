@@ -265,6 +265,10 @@
       "value": "FPS"
     },
     {
+      "name": "settings_codec",
+      "value": "Codec (recording)"
+    },
+    {
       "name": "settings_apply_video",
       "value": "Apply video settings"
     },

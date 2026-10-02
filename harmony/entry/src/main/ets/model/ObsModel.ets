@@ -148,7 +148,7 @@ export class ObsAppState {
   @Trace systemAudio: SystemAudioStatus = new SystemAudioStatus();
 
   /** Editable RTMP target — mirrored into the settings panel and persisted. */
-  @Trace streamingServer: string = 'rtmp://192.168.31.19:1935/live';
+  @Trace streamingServer: string = 'rtmp://192.168.0.100:1935/live';
   @Trace streamingKey: string = 'obs-test';
   /** Filled with a sandbox path at init time; user can change it later. */
   @Trace recordingPath: string = '';
@@ -157,6 +157,8 @@ export class ObsAppState {
   @Trace setVideoWidth: number = 1920;
   @Trace setVideoHeight: number = 1080;
   @Trace setVideoFps: number = 60;
+  /** 'h264' | 'hevc' — video encoder codec for both outputs. */
+  @Trace setVideoCodec: string = 'h264';
   @Trace setRecordVideoKbps: number = 10000;
   @Trace setRecordAudioKbps: number = 192;
   @Trace setStreamVideoKbps: number = 2500;
@@ -180,6 +182,8 @@ class RecordingConfig {
   format: string = 'mp4';
   videoBitrateKbps: number = 10000;
   audioBitrateKbps: number = 192;
+  /** 'h264' | 'hevc' — hardware codec for the recording's video track. */
+  videoCodec: string = 'h264';
 }
 
 /**
@@ -225,6 +229,7 @@ export class ObsController {
       model.setVideoWidth = s.videoWidth;
       model.setVideoHeight = s.videoHeight;
       model.setVideoFps = s.videoFps;
+      model.setVideoCodec = s.videoCodec;
       model.setRecordVideoKbps = s.recordVideoKbps;
       model.setRecordAudioKbps = s.recordAudioKbps;
       model.setStreamVideoKbps = s.streamVideoKbps;
@@ -257,6 +262,7 @@ export class ObsController {
     s.videoWidth = model.setVideoWidth;
     s.videoHeight = model.setVideoHeight;
     s.videoFps = model.setVideoFps;
+    s.videoCodec = model.setVideoCodec;
     s.recordVideoKbps = model.setRecordVideoKbps;
     s.recordAudioKbps = model.setRecordAudioKbps;
     s.streamVideoKbps = model.setStreamVideoKbps;
@@ -579,6 +585,7 @@ export class ObsController {
     config.path = model.recordingPath;
     config.videoBitrateKbps = model.setRecordVideoKbps;
     config.audioBitrateKbps = model.setRecordAudioKbps;
+    config.videoCodec = model.setVideoCodec;
     const started = ObsBridge.startRecording(JSON.stringify(config));
     if (started) {
       // Optimistic: the stats thread may not have started pushing yet, and

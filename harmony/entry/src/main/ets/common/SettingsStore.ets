@@ -17,6 +17,8 @@ export class ObsSettings {
   videoWidth: number = 1920;
   videoHeight: number = 1080;
   videoFps: number = 60;
+  /** Video codec: 'h264' or 'hevc' (OH_VideoEncoder hardware path). */
+  videoCodec: string = 'h264';
   /** Recording encoder bitrates (kbps). */
   recordVideoKbps: number = 10000;
   recordAudioKbps: number = 192;
@@ -24,7 +26,7 @@ export class ObsSettings {
   streamVideoKbps: number = 2500;
   streamAudioKbps: number = 160;
   /** RTMP target. */
-  streamingServer: string = 'rtmp://192.168.31.19:1935/live';
+  streamingServer: string = 'rtmp://192.168.0.100:1935/live';
   streamingKey: string = 'obs-test';
 }
 
@@ -60,6 +62,9 @@ export class SettingsStore {
       }
       if (typeof parsed.videoFps === 'number') {
         merged.videoFps = parsed.videoFps;
+      }
+      if (parsed.videoCodec === 'hevc' || parsed.videoCodec === 'h264') {
+        merged.videoCodec = parsed.videoCodec;
       }
       if (typeof parsed.recordVideoKbps === 'number') {
         merged.recordVideoKbps = parsed.recordVideoKbps;
