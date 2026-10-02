@@ -52,6 +52,7 @@ struct harmony_window_capture {
 	bool capture_cursor;
 
 	bool running;
+	int32_t selected_type; /* from the picker's user-selection callback */
 };
 
 static const char *window_capture_get_name(void *unused)
@@ -211,6 +212,23 @@ static void window_capture_on_error(OH_AVScreenCapture *capture, int32_t error_c
 	UNUSED_PARAMETER(capture);
 }
 
+/* Selection callback (API 20): informational only. The capture service
+ * applies the user's picker choice to the running instance itself — the C
+ * API deliberately exposes no windowId (only type + displayId), and the
+ * PresentPicker docs state capture continues "with the newly selected
+ * source" after the picker closes. */
+static void window_capture_on_user_selected(OH_AVScreenCapture *capture, OH_AVScreenCapture_UserSelectionInfo *selections,
+					    void *user_data)
+{
+	struct harmony_window_capture *cap = user_data;
+	int32_t type = -1;
+	OH_AVScreenCapture_GetCaptureTypeSelected(selections, &type);
+	cap->selected_type = type;
+	blog(LOG_INFO, LOG_PREFIX "user selected capture type %d (0=screen 1=window 2=app)", type);
+
+	UNUSED_PARAMETER(capture);
+}
+
 static void window_capture_on_state_change(OH_AVScreenCapture *capture, OH_AVScreenCaptureStateCode state_code,
 					   void *user_data)
 {
@@ -319,6 +337,31 @@ static bool window_capture_start(struct harmony_window_capture *cap)
 		return false;
 	}
 
+	/* Must be registered before the authorization flow starts (header
+	 * docs, API 20). */
+	err = OH_AVScreenCapture_SetSelectionCallback(cap->capture, window_capture_on_user_selected, cap);
+	if (err != AV_SCREEN_CAPTURE_ERR_OK)
+		blog(LOG_WARNING, LOG_PREFIX "SetSelectionCallback failed with %d (continuing)", (int)err);
+
+	/* mission 0 = "let the user choose a window". The official mechanism
+	 * is the capture strategy's PickerPopUp switch (API 20): "If set to
+	 * True, the Picker will pop up uniformly after screen capture
+	 * starts". Must be set before Start. (PresentPicker is only for
+	 * re-showing the picker DURING an active capture and returns
+	 * OPERATE_NOT_PERMIT outside that state — verified on device.) */
+	if (cap->mission_id <= 0) {
+		OH_AVScreenCapture_CaptureStrategy *strategy = OH_AVScreenCapture_CreateCaptureStrategy();
+		if (strategy != NULL) {
+			OH_AVScreenCapture_StrategyForPickerPopUp(strategy, true);
+			err = OH_AVScreenCapture_SetCaptureStrategy(cap->capture, strategy);
+			if (err != AV_SCREEN_CAPTURE_ERR_OK)
+				blog(LOG_WARNING, LOG_PREFIX "SetCaptureStrategy failed with %d", (int)err);
+			OH_AVScreenCapture_ReleaseCaptureStrategy(strategy);
+		} else {
+			blog(LOG_WARNING, LOG_PREFIX "CreateCaptureStrategy returned NULL");
+		}
+	}
+
 	err = OH_AVScreenCapture_Init(cap->capture, config);
 	if (err != AV_SCREEN_CAPTURE_ERR_OK) {
 		blog(LOG_ERROR, LOG_PREFIX "Init failed with %d (is mission %d still alive?)", (int)err,
@@ -333,6 +376,15 @@ static bool window_capture_start(struct harmony_window_capture *cap)
 	if (err != AV_SCREEN_CAPTURE_ERR_OK) {
 		blog(LOG_ERROR, LOG_PREFIX "StartScreenCapture failed with %d", (int)err);
 		return false;
+	}
+
+	/* Safety net: if the PickerPopUp strategy did not surface a picker
+	 * (selection callback never fired), try the dynamic-update entry
+	 * point once. */
+	if (cap->mission_id <= 0) {
+		err = OH_AVScreenCapture_PresentPicker(cap->capture);
+		if (err != AV_SCREEN_CAPTURE_ERR_OK)
+			blog(LOG_WARNING, LOG_PREFIX "PresentPicker fallback failed with %d", (int)err);
 	}
 
 	blog(LOG_INFO, LOG_PREFIX "capture started (mission %d, %ux%u @ %d fps)", cap->mission_id, cap->width,
@@ -376,6 +428,7 @@ static void *window_capture_create(obs_data_t *settings, obs_source_t *source)
 	struct harmony_window_capture *cap = bzalloc(sizeof(*cap));
 
 	cap->source = source;
+	cap->selected_type = -1; /* 0 is a valid picker result (screen) */
 	cap->capture = OH_AVScreenCapture_Create();
 
 	if (cap->capture == NULL) {
