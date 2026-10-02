@@ -16,6 +16,18 @@ export struct SettingsPanel {
 
   private resolutions: string[] = ['1280x720', '1920x1080', '2560x1440', '3840x2160'];
   private fpsOptions: number[] = [30, 60];
+  private codecOptions: string[] = ['H.264', 'HEVC'];
+
+  private codecIndex(): number {
+    return this.model.setVideoCodec === 'hevc' ? 1 : 0;
+  }
+
+  private codecOptionList(): SelectOption[] {
+    return this.codecOptions.map((c: string): SelectOption => {
+      const opt: SelectOption = { value: c };
+      return opt;
+    });
+  }
 
   private resolutionLabel(): string {
     return `${this.model.setVideoWidth}x${this.model.setVideoHeight}`;
@@ -89,6 +101,26 @@ export struct SettingsPanel {
           }, (fps: number) => `${fps}`)
         }
         .layoutWeight(1)
+      }
+      .width('100%')
+
+      Row({ space: 8 }) {
+        Text($r('app.string.settings_codec'))
+          .fontSize(13)
+          .fontColor($r('app.color.obs_text_secondary'))
+          .width(110)
+        Select(this.codecOptionList())
+          .selected(this.codecIndex())
+          .value(this.codecOptions[this.codecIndex()])
+          .font({ size: 13 })
+          .fontColor($r('app.color.obs_text_primary'))
+          .selectedOptionFont({ size: 13 })
+          .optionFont({ size: 13 })
+          .layoutWeight(1)
+          .onSelect((index: number) => {
+            this.model.setVideoCodec = index === 1 ? 'hevc' : 'h264';
+            ObsController.saveSettings();
+          })
       }
       .width('100%')
 

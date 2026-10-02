@@ -468,36 +468,42 @@ void StopStatsThread()
     }
 }
 
-// Shared encoder factory for both outputs. The ids below are the software
-// fallbacks OBS uses everywhere; on HarmonyOS the production path is a custom
-// Prefer the OH_VideoEncoder hardware path (plugins/harmony-vcodec, id
-// "harmony_h264"). Software x264 on a phone/PC SoC cannot sustain 1080p60 and
-// would burn the battery, so it is only a fallback for when the hardware
-// encoder is unavailable — no AVCodec H.264 capability, or the encoder rejects
-// the requested profile. Whichever wins is logged, because the two behave very
-// differently under load and that distinction matters when debugging drops.
-obs_encoder_t *CreateVideoEncoder(int64_t bitrateKbps, const char **failureOut)
+// Shared encoder factory for both outputs. Prefer the OH_VideoEncoder
+// hardware path (plugins/harmony-vcodec, ids "harmony_h264"/"harmony_hevc").
+// When the settings panel asks for HEVC, harmony_hevc leads the chain and
+// falls back to H.264 hardware (some devices' HEVC encoder rejects a
+// resolution or profile); H.264 requests never silently upgrade. Software
+// x264 on a phone/PC SoC cannot sustain 1080p60 and would burn the battery,
+// so it is only the last resort when no hardware encoder is available.
+// Whichever wins is logged, because the two behave very differently under
+// load and that distinction matters when debugging drops.
+obs_encoder_t *CreateVideoEncoder(int64_t bitrateKbps, const char *codec, const char **failureOut)
 {
-    static const char *kEncoderIds[] = {"harmony_h264", "obs_x264"};
+    const bool wantHevc = codec != nullptr && strcmp(codec, "hevc") == 0;
+    static const char *kHevcIds[] = {"harmony_hevc", "harmony_h264", "obs_x264"};
+    static const char *kH264Ids[] = {"harmony_h264", "obs_x264"};
+    const char *const *ids = wantHevc ? kHevcIds : kH264Ids;
+    const size_t idCount = wantHevc ? sizeof(kHevcIds) / sizeof(kHevcIds[0])
+                                    : sizeof(kH264Ids) / sizeof(kH264Ids[0]);
 
     obs_data_t *settings = obs_data_create();
     obs_data_set_int(settings, "bitrate", bitrateKbps);
 
     obs_encoder_t *encoder = nullptr;
-    for (const char *id : kEncoderIds) {
-        encoder = obs_video_encoder_create(id, "harmony_video_encoder", settings, nullptr);
+    for (size_t i = 0; i < idCount; i++) {
+        encoder = obs_video_encoder_create(ids[i], "harmony_video_encoder", settings, nullptr);
         if (encoder != nullptr) {
-            OH_LOG_INFO(LOG_APP, "video encoder: %{public}s (bitrate=%{public}lld kbps)", id,
+            OH_LOG_INFO(LOG_APP, "video encoder: %{public}s (bitrate=%{public}lld kbps)", ids[i],
                         static_cast<long long>(bitrateKbps));
             break;
         }
-        OH_LOG_WARN(LOG_APP, "video encoder '%{public}s' unavailable, trying next", id);
+        OH_LOG_WARN(LOG_APP, "video encoder '%{public}s' unavailable, trying next", ids[i]);
     }
 
     obs_data_release(settings);
 
     if (encoder == nullptr && failureOut != nullptr) {
-        *failureOut = "harmony_h264/obs_x264";
+        *failureOut = wantHevc ? "harmony_hevc/harmony_h264/obs_x264" : "harmony_h264/obs_x264";
     }
     return encoder;
 }
@@ -516,10 +522,10 @@ obs_encoder_t *CreateAudioEncoder(int64_t bitrateKbps, const char **failureOut)
 }
 
 bool WireOutputEncoders(obs_output_t *output, int64_t videoKbps, int64_t audioKbps,
-                        std::string &errorOut)
+                        const char *videoCodec, std::string &errorOut)
 {
     const char *failedId = nullptr;
-    obs_encoder_t *video = CreateVideoEncoder(videoKbps, &failedId);
+    obs_encoder_t *video = CreateVideoEncoder(videoKbps, videoCodec, &failedId);
     if (video == nullptr) {
         errorOut = std::string("video encoder unavailable (plugin id not loaded: ") +
                    (failedId != nullptr ? failedId : "?") +
@@ -1475,8 +1481,11 @@ napi_value NativeStartStreaming(napi_env env, napi_callback_info info)
      * NativeStopStreaming / on failed start. */
 
     std::string encoderError;
+    /* Streaming stays on the H.264 chain: legacy RTMP/FLV has no standard
+     * HEVC tag (desktop OBS needs SIST for HEVC), so the settings-panel
+     * codec switch only governs recording. */
     if (!WireOutputEncoders(output, videoKbps > 0 ? videoKbps : 2500,
-                            audioKbps > 0 ? audioKbps : 160, encoderError)) {
+                            audioKbps > 0 ? audioKbps : 160, nullptr, encoderError)) {
         obs_service_release(service);
         obs_output_release(output);
         return ThrowError(env, encoderError.c_str());
@@ -1563,6 +1572,7 @@ napi_value NativeStartRecording(napi_env env, napi_callback_info info)
     }
     const int64_t videoKbps = obs_data_get_int(config, "videoBitrateKbps");
     const int64_t audioKbps = obs_data_get_int(config, "audioBitrateKbps");
+    const std::string videoCodecCopy = obs_data_get_string(config, "videoCodec");
 
     obs_output_t *output = obs_output_create("mp4_output", "harmony_recording", config, nullptr);
     obs_data_release(config);
@@ -1571,7 +1581,7 @@ napi_value NativeStartRecording(napi_env env, napi_callback_info info)
     }
     std::string encoderError;
     if (!WireOutputEncoders(output, videoKbps > 0 ? videoKbps : 10000,
-                            audioKbps > 0 ? audioKbps : 192, encoderError)) {
+                            audioKbps > 0 ? audioKbps : 192, videoCodecCopy.c_str(), encoderError)) {
         obs_output_release(output);
         return ThrowError(env, encoderError.c_str());
     }

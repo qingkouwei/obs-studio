@@ -265,6 +265,10 @@
       "value": "帧率"
     },
     {
+      "name": "settings_codec",
+      "value": "编码器(录制)"
+    },
+    {
       "name": "settings_apply_video",
       "value": "应用视频设置"
     },
