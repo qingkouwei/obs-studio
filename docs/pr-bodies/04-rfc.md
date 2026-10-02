@@ -14,7 +14,7 @@ Before any large PR, this RFC asks: **what shape would a mergeable HarmonyOS con
 
 3. **Host app**: the ArkTS/ArkUI shell + napi bridge is inherently out-of-tree-shaped; I plan to keep it in a separate repo unless maintainers want it under `harmony/`.
 
-4. **Process**: I'm running the whole port as a public ledger branch with small slices PR'd independently (two are up now). Happy to rebase/reshape per whatever review cadence works.
+4. **Process**: I'm running the whole port as a public ledger branch with small slices PR'd independently (three are up now: effect float-literal typos, redundant zero texel-offsets, `float(lod)` in textureLod emission). Happy to rebase/reshape per whatever review cadence works.
 
 Full per-bug journey writeup available; happy to answer specifics.
 
