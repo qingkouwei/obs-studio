@@ -93,6 +93,18 @@ static bool copy_packed_frame(struct obs_source_frame *frame, const uint8_t *src
 		memcpy(frame->data[0] + (size_t)row * frame->linesize[0], src + (size_t)row * src_row_bytes,
 		       frame->linesize[0]);
 
+	/* The capture service leaves the alpha byte undefined; libobs blends
+	 * with premultiplied alpha so a zero alpha makes the source fully
+	 * transparent (black preview). Force opaque. */
+	if (frame->format == VIDEO_FORMAT_RGBA || frame->format == VIDEO_FORMAT_BGRX ||
+	    frame->format == VIDEO_FORMAT_BGRA) {
+		for (uint32_t row = 0; row < frame->height; row++) {
+			uint8_t *d = frame->data[0] + (size_t)row * frame->linesize[0];
+			for (uint32_t col = 3; col < frame->width * 4; col += 4)
+				d[col] = 0xFF;
+		}
+	}
+
 	return true;
 }
 
@@ -151,27 +163,24 @@ static void window_capture_on_buffer_available(OH_AVScreenCapture *capture, OH_A
 	}
 
 	OH_NativeBuffer_Config config = {0};
-	void *addr = NULL;
+	OH_NativeBuffer_GetConfig(native_buffer, &config);
 
-	if (OH_NativeBuffer_MapAndGetConfig(native_buffer, &addr, &config) != 0) {
-		blog(LOG_ERROR, LOG_PREFIX "failed to map video buffer");
-		return;
-	}
+	/* CPU address straight from the AVBuffer (official sample path).
+	 * MapAndGetConfig on the NativeBuffer can yield an all-zero view for
+	 * GPU-usage buffers — same trap as display capture (journey §3.9). */
+	const uint8_t *pixels = (const uint8_t *)OH_AVBuffer_GetAddr(buffer);
 
 	const enum video_format format = nativebuffer_format_to_obs(config.format);
 	if (format == VIDEO_FORMAT_NONE) {
 		blog(LOG_WARNING, LOG_PREFIX "unsupported native buffer pixel format %d, dropping frame",
 		     config.format);
-		OH_NativeBuffer_Unmap(native_buffer);
 		return;
 	}
 
 	struct obs_source_frame *frame = obs_source_frame_create(format, (uint32_t)config.width,
 								 (uint32_t)config.height);
-	if (frame == NULL) {
-		OH_NativeBuffer_Unmap(native_buffer);
+	if (frame == NULL)
 		return;
-	}
 
 	/* AVScreenCapture timestamps are CLOCK_MONOTONIC nanoseconds, the same
 	 * clock os_gettime_ns() uses, so they can be passed through directly. */
@@ -179,13 +188,9 @@ static void window_capture_on_buffer_available(OH_AVScreenCapture *capture, OH_A
 
 	bool copied = false;
 	if (format == VIDEO_FORMAT_NV12) {
-		/* The mapping created by MapAndGetConfig is released here;
-		 * copy_nv12_frame maps the planes itself. */
-		OH_NativeBuffer_Unmap(native_buffer);
 		copied = copy_nv12_frame(frame, native_buffer);
-	} else {
-		copied = copy_packed_frame(frame, (const uint8_t *)addr, config.stride);
-		OH_NativeBuffer_Unmap(native_buffer);
+	} else if (pixels != NULL) {
+		copied = copy_packed_frame(frame, pixels, config.stride);
 	}
 
 	if (copied)
@@ -250,10 +255,14 @@ static void window_capture_stop(struct harmony_window_capture *cap)
 
 static bool window_capture_start(struct harmony_window_capture *cap)
 {
-	if (cap->mission_id <= 0) {
-		blog(LOG_ERROR, LOG_PREFIX "no window selected: set a valid mission ID in the source properties");
-		return false;
-	}
+	/* mission_id == 0 is a first-class mode, not an error: the official
+	 * C flow (avscreencapture-c-basic-process) documents that an empty
+	 * missionIDs list makes the system show its own window-selection
+	 * Picker — the user picks the window there and capture starts after
+	 * confirmation (state callback OH_SCREEN_CAPTURE_STATE_STARTED).
+	 * A configured mission ID merely pre-selects that window in the
+	 * Picker. Either way the user always confirms; there is no silent
+	 * window capture. */
 
 	OH_AVScreenCaptureConfig config = {0};
 	int32_t mission_ids[1] = {cap->mission_id};
@@ -276,8 +285,14 @@ static bool window_capture_start(struct harmony_window_capture *cap)
 	config.audioInfo.audioEncInfo.audioCodecformat = OH_AUDIO_DEFAULT;
 
 	config.videoInfo.videoCapInfo.displayId = 0;
-	config.videoInfo.videoCapInfo.missionIDs = mission_ids;
-	config.videoInfo.videoCapInfo.missionIDsLen = 1;
+	if (cap->mission_id > 0) {
+		config.videoInfo.videoCapInfo.missionIDs = mission_ids;
+		config.videoInfo.videoCapInfo.missionIDsLen = 1;
+	} else {
+		/* empty list -> system window Picker */
+		config.videoInfo.videoCapInfo.missionIDs = NULL;
+		config.videoInfo.videoCapInfo.missionIDsLen = 0;
+	}
 	config.videoInfo.videoCapInfo.videoFrameWidth = (int32_t)cap->width;
 	config.videoInfo.videoCapInfo.videoFrameHeight = (int32_t)cap->height;
 	config.videoInfo.videoCapInfo.videoSource = OH_VIDEO_SOURCE_SURFACE_RGBA;
