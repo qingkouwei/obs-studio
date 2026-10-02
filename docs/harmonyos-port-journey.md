@@ -350,7 +350,13 @@ mission-0 模式 Init/Start 成功但系统不弹窗口选择器（"空 missionI
 
 ### 5.14 转场接线：channel 0 的所有权游戏（10-03 凌晨）
 
-obs-transitions 早就加载了，接前端时踩到 libobs 的一道硬检查：`transition_valid()` 要求 `info.type == OBS_SOURCE_TYPE_TRANSITION`——**场景源不能直接挂转场**。正确姿势抄 Qt 前端与内置 slideshow：养一个私有 `fade_transition` 壳源持有节目通道——首次带时长的场景切换把当前通道源 seed 进壳（obs_transition_set）、壳绑 channel 0、`obs_transition_start(AUTO, duration)` 淡入目标；之后的切换复用同一个壳（libobs 内部换 A/B 继续 tick）；时长<=0 或插件缺席退回直切。由此引出一条**所有权不变量**：壳一旦诞生，channel 0 永远归它——NativeCreateScene 的直绑逻辑必须改道（壳在场时新场景走 obs_transition_set 而非 obs_set_output_source 抢通道），否则新建场景会打断转场壳。这类"全局资源归属约定"是薄桥接层最容易漏的账。设置面板加"场景切换"档位（切/300/600/1000ms）持久化；音频四滤镜（增益/噪声阈值/降噪/同步偏移）同批进候选清单。进包验证（bridge.so 符号 + abc 标识符）完成；叠化观感与听感的真机复验待设备回线。
+obs-transitions 早就加载了，接前端时踩到 libobs 的一道硬检查：`transition_valid()` 要求 `info.type == OBS_SOURCE_TYPE_TRANSITION`——**场景源不能直接挂转场**。正确姿势抄 Qt 前端与内置 slideshow：养一个私有 `fade_transition` 壳源持有节目通道——首次带时长的场景切换把当前通道源 seed 进壳（obs_transition_set）、壳绑 channel 0、`obs_transition_start(AUTO, duration)` 淡入目标；之后的切换复用同一个壳（libobs 内部换 A/B 继续 tick）；时长<=0 或插件缺席退回直切。由此引出一条**所有权不变量**：壳一旦诞生，channel 0 永远归它——NativeCreateScene 的直绑逻辑必须改道（壳在场时新场景走 obs_transition_set 而非 obs_set_output_source 抢通道），否则新建场景会打断转场壳。这类"全局资源归属约定"是薄桥接层最容易漏的账。设置面板加"场景切换"档位（切/300/600/1000ms）持久化；音频四滤镜（增益/噪声阈值/降噪/同步偏移）同批进候选清单。
+
+真机复验（10-03 晨，设备换址 192.168.0.102）：日志 `harmony_scene_transition (fade_transition) created` + `scene transition started (300 ms)`；录制成片抽帧证实叠化——t=3s 帧 6KB（空场景近黑）、t=14.6s 帧 161KB（场景 1 全画面），中间中心像素 0→3→6 斜坡历时 ≈0.4s ≈ 300ms 淡入。**同批复验还揪出一个谎报**：给纯视频屏幕源挂音频滤镜，`obs_source_filter_add`（void 返回）内部 `filter_compatible()` 静默拒绝，但桥接层照样 return true → UI 出现幽灵滤镜行。修复=镜像能力检查+加后验真（get_filter_by_name），双路径真机验证：麦克风源挂增益成功、屏幕源明确拒绝无幽灵行。
+
+### 5.15 ANR 专项：一次错误归因的公开处刑（10-03 晨闭环）
+
+10-02 晚把"坏态启动冻结 20–51 秒"归因给 `obs_reset_video`（依据：THREAD_BLOCK durationTime:51168 且日志里它最响）。这次专项用边界日志证伪了它：冻结进程主线程最后几行是 `libobs started (video rc=0)` **之后**的 OHAudioCapturer 回调设置行——图形路径早就走完了，卡点在桥接层 `StartTrack` 的同步 `OH_AudioCapturer_Start` IPC：force-stop 竞争后 audio_server 把新会话启动排在旧会话 capturer 回收之后（audio_server 侧同窗口可见 CAPTURE_PLAYBACK 权限清理日志），主线程干等 20+ 秒 → THREAD_BLOCK_6S → 杀。修复=两个 track 的启动挪 detached 线程（track 状态是 atomic、混音器轮询消费，UI 零损失；慢回收从"冻整个窗口"降级为"表针晚动几秒"）。复现节奏压测（启动→加麦克风源→杀，x10）：**10/10 存活、THREAD_BLOCK 计数 0**（修复前同节奏必现），录冒烟 11.7s 成片健康。教训：**归因要卡点两侧的边界证据，不要"日志里最吓眼的错误"**——上一轮的 51168ms 是等待总时长被记在谁头上的问题，不是卡点位置；这次 `video rc=0` 与 OHAudio 回调行的相邻关系一步定死。mic-capture.c 里三行 LOG_DEBUG 边界日志作为永久绊线保留。
 
 ## 6. 调试方法论（本项目的可复用资产）
 
@@ -380,7 +386,7 @@ obs-transitions 早就加载了，接前端时踩到 libobs 的一道硬检查�
 ## 8. 已知遗留
 
 - 色彩管理：~~GS_BGRA→RGBA 退让 + 8bit canvas 的 sRGB 双重编码~~ —— **10-02 晚已闭环**：色卡测量实锤根因后，GS_BGRA 渲染目标恢复 GL_SRGB8_ALPHA8（§3.4 被拒的只是 BGRA_EXT 三元组），录制色值与恒等截图 Δ≤4。详见 docs/harmonyos-color-measurement.md
-- **新遗留（10-02 晚发现，归因已细化）**：反复"采集会话启停 + 应用焦点切换"后应用 ANR（THREAD_BLOCK_6S）、录制文件 0 字节——sRGB 改动前的构建同样复现。复现轮抓到关键数据：坏态下卡点在 **libobs 启动路径**（THREAD_BLOCK_3S durationTime:51168 → obs_reset_video 主线程阻塞 51s → 系统杀进程）；设备重启后同版本同设置链路完全正常（设置恢复→录制 461s→成片 30fps 实证）。即坏态是触发条件、卡点在图形初始化，与上层功能无关（怀疑 AVScreenCapture 会话快速销毁重建时驱动侧回收路径）。规避=测量前重启设备、单轮会话完成抓取；专项排查待做
+- ~~**新遗留（10-02 晚发现，归因已细化）**：反复"采集会话启停 + 应用焦点切换"后应用 ANR（THREAD_BLOCK_6S）、录制文件 0 字节~~ —— **10-03 晨已闭环（§5.15）**。当时的归因（obs_reset_video 阻塞 51s）**是错的**：边界日志证明 `video rc=0` 在卡死前数秒已打印，真正卡点是桥接层 `StartTrack` 的同步 `OH_AudioCapturer_Start` IPC——force-stop 竞争后 audio_server 把新会话启动排在旧会话回收后面，主线程静默 20+ 秒被杀。修复=音频轨启动挪后台线程（状态原子+UI 轮询，无损失）。复现节奏 10 轮压测 0 冻结 + 录制冒烟通过
 - 插件加载清单的工程化（SELinux/linker-ns 约束下的体面方案）
 - 诊断探针全链清理（device_draw/attrbuf/uniform/shader dump/canvas 采样/帧计数）
 - ~~窗口采集、相机源的 Picker/权限流程~~ —— 相机源 10-02 已闭环（§5.8）；窗口 Picker 代码侧完备，卡 CUSTOM_SCREEN_RECORDING ACL 审批（§5.9）
