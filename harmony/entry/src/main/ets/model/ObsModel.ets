@@ -4,6 +4,7 @@ import { ObsBridge, SystemAudioCapability } from '../napi/obsBridge';
 import { Logger } from '../common/Logger';
 import { LongRunningTask } from '../common/LongRunningTask';
 import { KnockShareSender } from '../common/KnockShareSender';
+import { RecLiveWindow } from '../common/RecLiveWindow';
 import { IntentActions, IntentDispatcher, ObsActionKind } from '../insightintents/OBSIntentExecutor';
 import { ObsSettings, SettingsStore } from '../common/SettingsStore';
 import { common } from '@kit.AbilityKit';
@@ -669,6 +670,7 @@ export class ObsController {
       if (!model.stats.streaming && !model.stats.recording && ObsController.appContext) {
         LongRunningTask.release(ObsController.appContext, 'stream stopped');
       }
+      RecLiveWindow.stopStreaming();
       return;
     }
     const config = new StreamingConfig();
@@ -687,6 +689,7 @@ export class ObsController {
       if (ObsController.appContext) {
         LongRunningTask.acquire(ObsController.appContext, 'stream started');
       }
+      RecLiveWindow.startStreaming();
     } else {
       model.connectionState = ConnectionState.Error;
       model.bridgeNotice = $r('app.string.notice_stream_fail');
@@ -703,6 +706,7 @@ export class ObsController {
       if (!model.stats.recording && !model.stats.streaming && ObsController.appContext) {
         LongRunningTask.release(ObsController.appContext, 'record stopped');
       }
+      RecLiveWindow.stopRecording();
       // W3 C2: the finished clip is now knock-shareable — arm the sender so
       // tapping this window against a nearby device flies the mp4 out.
       try {
@@ -730,6 +734,7 @@ export class ObsController {
       if (ObsController.appContext) {
         LongRunningTask.acquire(ObsController.appContext, 'record started');
       }
+      RecLiveWindow.startRecording();
     } else {
       model.connectionState = ConnectionState.Error;
       model.bridgeNotice = $r('app.string.notice_record_fail');
