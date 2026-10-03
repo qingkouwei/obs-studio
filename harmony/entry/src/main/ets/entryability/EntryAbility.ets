@@ -3,6 +3,7 @@ import { window, promptAction, UIContext } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { Logger } from '../common/Logger';
 import { KnockShareReceiver } from '../common/KnockShareReceiver';
+import { KnockShareSender } from '../common/KnockShareSender';
 import { ObsBridge } from '../napi/obsBridge';
 import { ObsAppState } from '../model/ObsModel';
 
@@ -192,6 +193,7 @@ export default class EntryAbility extends UIAbility {
   onWindowStageDestroy(): void {
     Logger.info('onWindowStageDestroy');
     KnockShareReceiver.stop();
+    KnockShareSender.stop();
     if (this.mainWindow !== null) {
       try {
         this.mainWindow.off('windowWillClose');
@@ -217,11 +219,13 @@ export default class EntryAbility extends UIAbility {
     // The knock receiver is window/foreground scoped (official guidance:
     // unregister when backgrounded); re-arm on return to front.
     KnockShareReceiver.start(this.context);
+    KnockShareSender.rearm();
   }
 
   onBackground(): void {
     Logger.info('onBackground');
     KnockShareReceiver.stop();
+    KnockShareSender.stop();
     // Long-running broadcasts must survive backgrounding. The app declares
     // ohos.permission.KEEP_BACKGROUND_RUNNING; the actual continuous task
     // (backgroundTaskManager.startBackgroundRunning with an AUDIO_RECORDING /
