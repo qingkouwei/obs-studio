@@ -563,8 +563,8 @@ export class ObsController {
     }
   }
 
-  /** Copy one picker URI into filesDir; returns the sandbox path or ''. */
-  private static copyUriToSandbox(uri: string): string {
+  /** Copy one picker/drag URI into filesDir; returns the sandbox path or ''. */
+  static copyUriToSandbox(uri: string): string {
     try {
       const src = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
       const name = decodeURIComponent(uri.split('/').pop() ?? 'image')
