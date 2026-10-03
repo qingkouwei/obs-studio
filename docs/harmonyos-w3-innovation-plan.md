@@ -69,6 +69,7 @@ insight_intent.json 注册（JumpFunctionPage 一步达 + 自定义"开始直播
 
 1. **本批（今晚可做，单设备）**：C2 碰一碰成片/链接分享（需第二台设备验收——代码+自测监听注册先行）+ C3 意图注册（本机可验证小艺调用）+ C6 接续/拖拽骨架。
    - **进度（10-03 晨）**：C2 双向代码闭环——接收侧 `KnockShareReceiver`（手机图库图片碰进来→建图片源）、发起侧 `KnockShareSender`（停止录制后碰一下把成片 mp4 发出去）。C3 意图注册闭环——`insight_intent.json` 声明 StartLive/StartRecording（MediaDomain/前台/绑 EntryAbility），`OBSIntentExecutor` + `IntentActions` 待处理队列解决"冷启动执行器早于 initialize"时序。三者均编译进包验证（modules.abc + HAP profile）；设备侧运行时冒烟（监听恰好注册一次、意图被小艺命中）待设备回线；端到端碰一碰需第二台鸿蒙设备（用户手机）。C6 接续 onContinue 签名已核实（`onContinue(wantParam, since 11): OnContinueResult|Promise`），骨架待写。
+   - **进度（10-03 上午）**：C6 接续**代码闭环**——`Continuation.ets` 编解码设置袋（画布/编码器/码率/RTMP，**不迁移采集源**：设备与授权绑定，等价于"同配置、新采集"）；`onContinue` 序列化、目标端 `onCreate` 捕获进 `pendingContinuation`、`initialize()` 应用；`module.json5` 加 `continuable:true`。重构顺手**修一个真 bug**：saveSettings 此前漏存 `sceneTransitionMs`（转场时长重启即丢）。跨设备迁移往返需第二台设备验收。C6 拖拽接收（UDMF drop）未动（需第二台设备才能验，且 UnifiedData 记录结构待细核）。
 2. **下批**：C1 碰一碰开播（先跑互通相机分辨率实测）→ 成功后 C2/C1 合并成"碰系列"叙事。
 3. **上架后**：C5 实况窗权益申请（申请文案可复用 AGC 材料套路）+ C4 双机联调完整版。
 4. **长线**：C7 → C8。
