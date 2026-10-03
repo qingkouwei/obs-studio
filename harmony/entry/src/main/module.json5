@@ -131,6 +131,10 @@
         "startWindowIcon": "$media:start_icon",
         "startWindowBackground": "$color:start_window_background",
         "exported": true,
+        // W3 C6: opt this ability into cross-device continuation (the dock
+        // "flight handoff" gesture). onContinue ships the settings bag;
+        // sources are intentionally not migrated (device/consent-bound).
+        "continuable": true,
         "supportWindowMode": ["fullscreen", "split", "floating"],
         // Minimum free-window size for a desktop streaming control surface.
         // This SDK's module schema spells the PC min-size keys as
