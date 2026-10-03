@@ -3,6 +3,7 @@ import { NativeAudioTrack, NativeFilterEntry, NativeOutputLevel, NativeSceneEntr
 import { ObsBridge, SystemAudioCapability } from '../napi/obsBridge';
 import { Logger } from '../common/Logger';
 import { LongRunningTask } from '../common/LongRunningTask';
+import { KnockShareSender } from '../common/KnockShareSender';
 import { ObsSettings, SettingsStore } from '../common/SettingsStore';
 import { common } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
@@ -658,6 +659,15 @@ export class ObsController {
       ObsController.updateConnectionState();
       if (!model.stats.recording && !model.stats.streaming && ObsController.appContext) {
         LongRunningTask.release(ObsController.appContext, 'record stopped');
+      }
+      // W3 C2: the finished clip is now knock-shareable — arm the sender so
+      // tapping this window against a nearby device flies the mp4 out.
+      try {
+        if (!model.stats.recording && fileIo.accessSync(model.recordingPath)) {
+          KnockShareSender.arm(model.recordingPath, `QingStudio-${Date.now()}`);
+        }
+      } catch (err) {
+        Logger.warn(`knock-share arm skipped: ${Logger.asError(err as Object).message}`);
       }
       return;
     }
