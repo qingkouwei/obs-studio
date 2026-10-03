@@ -1,4 +1,5 @@
 import { ObsAppState, ObsController, SourceItemModel } from '../model/ObsModel';
+import { DragDropReceiver } from '../common/DragDropReceiver';
 
 /**
  * SourceList — the sources dock for the currently selected scene.
@@ -191,6 +192,16 @@ export struct SourceList {
     .layoutWeight(1)
     .padding(8)
     .alignItems(HorizontalAlign.Start)
+    // W3 C6: drop intake — images dragged from the file manager / gallery
+    // (or off a phone's screen bezel) land as sources in this scene. The
+    // predicate paints correct OS feedback for unsupported payloads.
+    .allowDrop(DragDropReceiver.allowedTypes())
+    .onDrop((event: DragEvent) => {
+      const data = event.getData();
+      if (data !== null && data !== undefined) {
+        DragDropReceiver.handleDrop(data);
+      }
+    })
     .bindSheet($$this.textSheetOpen,
       this.TextSourceSheet(),
       {
