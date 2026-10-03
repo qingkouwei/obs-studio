@@ -96,8 +96,11 @@ export class RecLiveWindow {
     RecLiveWindow.clickAgent(context).then((agent: Object) => {
       RecLiveWindow.startWithAgent(id, label, agent, onOk);
     }).catch((err: Object) => {
-      // A wantAgent failure is environmental, not an entitlement verdict.
-      Logger.warn(`${TAG}: clickAgent build failed: ${Logger.asError(err).message}`);
+      // startLiveView rejects also surface here (the inner promise chain
+      // unwinds into this catch) — route through the same triage.
+      const e = Logger.asError(err);
+      const code = (err as Object as Record<string, number>).code ?? -1;
+      RecLiveWindow.handleRejection(`start ${label}`, code, e.message);
     });
   }
 
@@ -113,13 +116,26 @@ export class RecLiveWindow {
       type: liveViewManager.CapsuleType.CAPSULE_TYPE_TIMER,
       status: 1,
       content: label,
+      // capsule.icon is runtime-mandatory too (fourth 401 layer, all
+      // declared optional): rawfile filename per the official example.
+      icon: 'capsule_rec.png',
+      backgroundColor: '#FF317AF7',
       time: 0,
       isCountdown: false,
     };
+    // LAYOUT_TYPE_DEFAULT = "extension area not displayed": the runtime
+    // validator demands per-template required members (progress templates
+    // want nodeIcons, both declared optional) — the base shape passes with
+    // just layoutType, and a recording indicator needs no extension area.
+    const layout: liveViewManager.LayoutData = {
+      layoutType: liveViewManager.LayoutType.LAYOUT_TYPE_DEFAULT,
+    };
+    primary.layoutData = layout;
     const data: liveViewManager.LiveViewData = { primary: primary, capsule: capsule };
     const liveView: liveViewManager.LiveView = {
       id: id,
       event: 'TIMER',
+      isMute: true,
       lifeCycleMode: liveViewManager.LifeCycleMode.AUTO_STOP_WHEN_APP_TERMINATE,
       liveViewData: data,
     };
@@ -146,6 +162,10 @@ export class RecLiveWindow {
     }
     const rich: liveViewManager.RichText = { text: '已结束' };
     const primary: liveViewManager.PrimaryData = { title: 'QingStudio', content: [rich], keepTime: 3 };
+    const layout: liveViewManager.LayoutData = {
+      layoutType: liveViewManager.LayoutType.LAYOUT_TYPE_DEFAULT,
+    };
+    primary.layoutData = layout;
     const data: liveViewManager.LiveViewData = { primary: primary };
     const liveView: liveViewManager.LiveView = {
       id: id,
