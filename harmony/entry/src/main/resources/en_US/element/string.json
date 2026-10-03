@@ -355,6 +355,10 @@
     {
       "name": "filter_late_delay",
       "value": "Sync Offset"
+    },
+    {
+      "name": "src_remote_camera",
+      "value": "Remote Cam"
     }
   ]
 }

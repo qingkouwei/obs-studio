@@ -355,6 +355,10 @@
     {
       "name": "filter_late_delay",
       "value": "同步偏移"
+    },
+    {
+      "name": "src_remote_camera",
+      "value": "远程相机"
     }
   ]
 }

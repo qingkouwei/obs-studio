@@ -22,6 +22,9 @@ const SOURCE_TYPES: SourceTypeEntry[] = [
   { label: $r('app.string.src_display'), id: 'harmony_display_capture' },
   { label: $r('app.string.src_window'), id: 'harmony_window_capture' },
   { label: $r('app.string.src_camera'), id: 'harmony_camera_capture' },
+  // W3 C1: mounts the Service Collaboration cross-device camera (the phone
+  // camera a same-account peer shares in) via the plugin's @remote sentinel.
+  { label: $r('app.string.src_remote_camera'), id: '@remote:harmony_camera_capture' },
   { label: $r('app.string.src_mic'), id: 'harmony_mic_capture' },
   { label: $r('app.string.src_desktop'), id: 'harmony_desktop_audio' },
   { label: $r('app.string.src_image'), id: '@picker:image_source' },
@@ -126,6 +129,8 @@ export struct SourceList {
               } else if (entry.id === '@dialog:text_ft2_source') {
                 this.textDraft = '';
                 this.textSheetOpen = true;
+              } else if (entry.id === '@remote:harmony_camera_capture') {
+                ObsController.addSource('harmony_camera_capture', JSON.stringify({ device_id: '@remote' }));
               } else {
                 ObsController.addSource(entry.id);
               }
