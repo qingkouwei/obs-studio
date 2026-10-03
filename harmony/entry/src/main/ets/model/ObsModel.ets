@@ -689,7 +689,7 @@ export class ObsController {
       if (ObsController.appContext) {
         LongRunningTask.acquire(ObsController.appContext, 'stream started');
       }
-      RecLiveWindow.startStreaming();
+      RecLiveWindow.startStreaming(ObsController.appContext);
     } else {
       model.connectionState = ConnectionState.Error;
       model.bridgeNotice = $r('app.string.notice_stream_fail');
@@ -734,7 +734,7 @@ export class ObsController {
       if (ObsController.appContext) {
         LongRunningTask.acquire(ObsController.appContext, 'record started');
       }
-      RecLiveWindow.startRecording();
+      RecLiveWindow.startRecording(ObsController.appContext);
     } else {
       model.connectionState = ConnectionState.Error;
       model.bridgeNotice = $r('app.string.notice_record_fail');
