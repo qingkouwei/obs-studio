@@ -5,7 +5,8 @@ import { Logger } from '../common/Logger';
 import { KnockShareReceiver } from '../common/KnockShareReceiver';
 import { KnockShareSender } from '../common/KnockShareSender';
 import { ObsBridge } from '../napi/obsBridge';
-import { ObsAppState } from '../model/ObsModel';
+import { ObsAppState, ObsController } from '../model/ObsModel';
+import { ContinuationCodec } from '../common/Continuation';
 
 /**
  * UIAbility for OBS on HarmonyOS PC (2in1).
@@ -41,6 +42,23 @@ export default class EntryAbility extends UIAbility {
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     Logger.info(`EntryAbility onCreate (launchReason=${launchParam.launchReason})`);
+    // W3 C6: continuation TARGET. When this instance was launched by a
+    // migration from another device, the source's onContinue payload is
+    // delivered via want.parameters (cold start / multi-instance) — capture
+    // it now; ObsController.initialize() applies it once the core is ready.
+    if (launchParam.launchReason === AbilityConstant.LaunchReason.CONTINUATION) {
+      ObsController.pendingContinuation = ContinuationCodec.decodeFromWant(want);
+    }
+  }
+
+  onContinue(wantParam: Record<string, Object>): AbilityConstant.OnContinueResult {
+    // W3 C6: continuation SOURCE. Serialize the settings bag into the
+    // migration payload. Capture sessions (screen/camera/mic) deliberately
+    // do NOT travel — they are device- and consent-bound; the target starts
+    // with the same profile and recreates sources.
+    const ok = ContinuationCodec.encode(ObsController.currentSettings(), wantParam);
+    Logger.info(`onContinue ${ok ? 'encoded' : 'FAILED to encode'}`);
+    return ok ? AbilityConstant.OnContinueResult.AGREE : AbilityConstant.OnContinueResult.REJECT;
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {

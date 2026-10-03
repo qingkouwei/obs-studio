@@ -206,6 +206,9 @@ export class ObsController {
    * libobs can open them with a plain path (media URIs are not open()able by
    * native code without a URI-permission handshake). */
   static filesDir: string = '';
+  /** W3 C6: settings bag captured by EntryAbility.onCreate on a CONTINUATION
+   * cold start; initialize() applies and clears it once the core is up. */
+  static pendingContinuation: ObsSettings | null = null;
 
   /** Called once from the main page's aboutToAppear(). */
   static initialize(configDir: string, codeDir: string, dataDir: string, defaultSceneName: string = 'Scene 1',
@@ -227,6 +230,14 @@ export class ObsController {
     }
     if (coreOk && context) {
       ObsController.loadSettings(context);
+    }
+    // W3 C6: a continuation payload from another device wins over the local
+    // disk profile (the user just chose "keep working over there").
+    if (ObsController.pendingContinuation !== null) {
+      const migrated = ObsController.pendingContinuation;
+      ObsController.pendingContinuation = null;
+      Logger.info('applying migrated settings (continuation target)');
+      ObsController.applySettings(migrated);
     }
     // W3 C3: insight-intent bridge. Register the action handler and release
     // anything the voice assistant queued while the core was still booting
@@ -253,54 +264,68 @@ export class ObsController {
    */
   static async loadSettings(context: common.UIAbilityContext): Promise<void> {
     try {
-      const model = ObsController.model;
       const s = await SettingsStore.load(context);
       Logger.info(`settings loaded: ${s.videoWidth}x${s.videoHeight}@${s.videoFps}`);
-      model.setVideoWidth = s.videoWidth;
-      model.setVideoHeight = s.videoHeight;
-      model.setVideoFps = s.videoFps;
-      model.setVideoCodec = s.videoCodec;
-      model.sceneTransitionMs = s.sceneTransitionMs;
-      model.setRecordVideoKbps = s.recordVideoKbps;
-      model.setRecordAudioKbps = s.recordAudioKbps;
-      model.setStreamVideoKbps = s.streamVideoKbps;
-      model.setStreamAudioKbps = s.streamAudioKbps;
-      model.streamingServer = s.streamingServer;
-      model.streamingKey = s.streamingKey;
-
-      const current = ObsBridge.getVideoInfo();
-      if (current.width !== s.videoWidth || current.height !== s.videoHeight || current.fps !== s.videoFps) {
-        if (ObsBridge.resetVideo(s.videoWidth, s.videoHeight, s.videoFps)) {
-          Logger.info(`video settings restored: ${s.videoWidth}x${s.videoHeight}@${s.videoFps}`);
-        } else {
-          Logger.warn(`resetVideo ${s.videoWidth}x${s.videoHeight}@${s.videoFps} rejected, keeping ${current.width}x${current.height}@${current.fps}`);
-        }
-      } else {
-        Logger.info('loadSettings: canvas already matches persisted geometry');
-      }
+      ObsController.applySettings(s);
     } catch (err) {
       Logger.error('loadSettings crashed', Logger.asError(err as Object));
     }
   }
 
-  /** Persist the current settings mirror. */
-  static saveSettings(): void {
+  /** Snapshot the live settings mirror into a serializable bag (used by
+   * saveSettings and the onContinue migration source). */
+  static currentSettings(): ObsSettings {
     const model = ObsController.model;
-    if (!ObsController.appContext) {
-      return;
-    }
     const s = new ObsSettings();
     s.videoWidth = model.setVideoWidth;
     s.videoHeight = model.setVideoHeight;
     s.videoFps = model.setVideoFps;
     s.videoCodec = model.setVideoCodec;
+    s.sceneTransitionMs = model.sceneTransitionMs;
     s.recordVideoKbps = model.setRecordVideoKbps;
     s.recordAudioKbps = model.setRecordAudioKbps;
     s.streamVideoKbps = model.setStreamVideoKbps;
     s.streamAudioKbps = model.setStreamAudioKbps;
     s.streamingServer = model.streamingServer;
     s.streamingKey = model.streamingKey;
-    SettingsStore.save(ObsController.appContext, s);
+    return s;
+  }
+
+  /** Write a settings bag into the live mirror and reset the canvas if the
+   * geometry differs. Shared by loadSettings (disk) and the continuation
+   * target (migrated payload). */
+  static applySettings(s: ObsSettings): void {
+    const model = ObsController.model;
+    model.setVideoWidth = s.videoWidth;
+    model.setVideoHeight = s.videoHeight;
+    model.setVideoFps = s.videoFps;
+    model.setVideoCodec = s.videoCodec;
+    model.sceneTransitionMs = s.sceneTransitionMs;
+    model.setRecordVideoKbps = s.recordVideoKbps;
+    model.setRecordAudioKbps = s.recordAudioKbps;
+    model.setStreamVideoKbps = s.streamVideoKbps;
+    model.setStreamAudioKbps = s.streamAudioKbps;
+    model.streamingServer = s.streamingServer;
+    model.streamingKey = s.streamingKey;
+
+    const current = ObsBridge.getVideoInfo();
+    if (current.width !== s.videoWidth || current.height !== s.videoHeight || current.fps !== s.videoFps) {
+      if (ObsBridge.resetVideo(s.videoWidth, s.videoHeight, s.videoFps)) {
+        Logger.info(`video settings restored: ${s.videoWidth}x${s.videoHeight}@${s.videoFps}`);
+      } else {
+        Logger.warn(`resetVideo ${s.videoWidth}x${s.videoHeight}@${s.videoFps} rejected, keeping ${current.width}x${current.height}@${current.fps}`);
+      }
+    } else {
+      Logger.info('loadSettings: canvas already matches persisted geometry');
+    }
+  }
+
+  /** Persist the current settings mirror. */
+  static saveSettings(): void {
+    if (!ObsController.appContext) {
+      return;
+    }
+    SettingsStore.save(ObsController.appContext, ObsController.currentSettings());
   }
 
   /** Apply the canvas geometry from the settings panel. */
