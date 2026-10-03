@@ -59,6 +59,10 @@ export class KnockShareReceiver {
         windowId: windowId,
         capabilities: [
           { utd: utd.UniformDataType.IMAGE, maxSupportedCount: 5 },
+          // W3 C1: a tiny text payload knocked from any device is a
+          // control signal ("obs-knock://camera"), not content — receive
+          // plain text too.
+          { utd: utd.UniformDataType.PLAIN_TEXT, maxSupportedCount: 1 },
         ],
       };
       harmonyShare.on('dataReceive', registry, (target: harmonyShare.ReceivableTarget) => {
@@ -99,9 +103,27 @@ export class KnockShareReceiver {
     const records: systemShare.SharedRecord[] = data.getRecords();
     for (const rec of records) {
       Logger.info(`${TAG}: record utd=${rec.utd} uri=${rec.uri ?? ''} content=${rec.content ?? ''}`);
+      if (rec.content && KnockShareReceiver.isText(rec.utd)) {
+        KnockShareReceiver.handleSignal(rec.content);
+        continue;
+      }
       if (rec.uri && KnockShareReceiver.isImage(rec.utd)) {
         KnockShareReceiver.acceptImage(rec.uri);
       }
+    }
+  }
+
+  /** W3 C1: control-signal grammar. A knocked plain-text payload of
+   * "obs-knock://camera" mounts the Service Collaboration cross-device
+   * camera as a harmony_camera_capture source (device_id=@remote selects
+   * the CAMERA_CONNECTION_REMOTE entry in the plugin). Any other text is
+   * logged and ignored — an unknown signal must never do anything
+   * surprising. */
+  private static handleSignal(content: string): void {
+    const trimmed = content.trim();
+    Logger.info(`${TAG}: signal payload "${trimmed}"`);
+    if (trimmed === 'obs-knock://camera') {
+      ObsController.addSource('harmony_camera_capture', JSON.stringify({ device_id: '@remote' }));
     }
   }
 
@@ -137,5 +159,9 @@ export class KnockShareReceiver {
 
   private static isImage(utdType: string): boolean {
     return utdType.indexOf('image') >= 0;
+  }
+
+  private static isText(utdType: string): boolean {
+    return utdType.indexOf('text') >= 0;
   }
 }

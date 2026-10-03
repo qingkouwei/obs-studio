@@ -174,16 +174,35 @@ static bool camera_capture_find_device(Camera_Manager *manager, const char *devi
 	}
 
 	const Camera_Device *found = NULL;
+	/* "@remote" is a sentinel, not an id: the Service Collaboration
+	 * cross-device camera (the phone camera mounted into this device's
+	 * Camera Kit under the same account) shows up as a regular entry
+	 * with CAMERA_CONNECTION_REMOTE. Pick it preferentially; a plain
+	 * first-camera fallback keeps the knock-from-future flow working
+	 * even when the remote mount is not up (yet). */
+	const bool want_remote = device_id != NULL && strcmp(device_id, "@remote") == 0;
+	const Camera_Device *remote = NULL;
 	for (uint32_t i = 0; i < size; i++) {
 		const Camera_Device *camera = &cameras[i];
 		if (camera->cameraId == NULL)
 			continue;
-		if (device_id != NULL && device_id[0] != '\0' && strcmp(camera->cameraId, device_id) == 0) {
+		if (device_id != NULL && device_id[0] != '\0' && !want_remote &&
+		    strcmp(camera->cameraId, device_id) == 0) {
 			found = camera;
+			break;
+		}
+		if (want_remote && camera->connectionType == CAMERA_CONNECTION_REMOTE) {
+			remote = camera;
 			break;
 		}
 		if (found == NULL)
 			found = camera;
+	}
+	if (want_remote && remote != NULL) {
+		blog(LOG_INFO, LOG_PREFIX "selected remote (cross-device) camera '%s'", remote->cameraId);
+		found = remote;
+	} else if (want_remote) {
+		blog(LOG_WARNING, LOG_PREFIX "no CAMERA_CONNECTION_REMOTE device present, falling back to first camera");
 	}
 
 	if (found == NULL) {
@@ -198,7 +217,7 @@ static bool camera_capture_find_device(Camera_Manager *manager, const char *devi
 	out->cameraType = found->cameraType;
 	out->connectionType = found->connectionType;
 
-	if (device_id != NULL && device_id[0] != '\0' && strcmp(device_id, id_buf) != 0)
+	if (!want_remote && device_id != NULL && device_id[0] != '\0' && strcmp(device_id, id_buf) != 0)
 		blog(LOG_WARNING, LOG_PREFIX "camera '%s' not found, falling back to '%s'", device_id, id_buf);
 
 	OH_CameraManager_DeleteSupportedCameras(manager, cameras, size);
@@ -995,12 +1014,17 @@ static obs_properties_t *camera_capture_get_properties(void *data)
 
 				struct dstr label;
 				dstr_init(&label);
-				dstr_printf(&label, "%s camera %s (%s)", camera_position_to_string(camera->cameraPosition),
-					    camera->cameraId, camera_type_to_string(camera->cameraType));
+				dstr_printf(&label, "%s camera %s (%s%s)", camera_position_to_string(camera->cameraPosition),
+					    camera->cameraId, camera_type_to_string(camera->cameraType),
+					    camera->connectionType == CAMERA_CONNECTION_REMOTE ? ", remote" : "");
 				obs_property_list_add_string(device_list, label.array, camera->cameraId);
 				dstr_free(&label);
 
-				if (!have_device && (device_id[0] == '\0' || strcmp(camera->cameraId, device_id) == 0)) {
+				const bool remote_match =
+					device_id != NULL && strcmp(device_id, "@remote") == 0 &&
+					camera->connectionType == CAMERA_CONNECTION_REMOTE;
+				if (!have_device && (remote_match || device_id[0] == '\0' ||
+						     strcmp(camera->cameraId, device_id) == 0)) {
 					snprintf(selected_id_buf, sizeof(selected_id_buf), "%s", camera->cameraId);
 					selected_device = *camera;
 					selected_device.cameraId = selected_id_buf;
