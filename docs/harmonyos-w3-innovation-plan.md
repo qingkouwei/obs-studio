@@ -72,6 +72,7 @@ insight_intent.json 注册（JumpFunctionPage 一步达 + 自定义"开始直播
    - **进度（10-03 上午）**：C6 接续**代码闭环**——`Continuation.ets` 编解码设置袋（画布/编码器/码率/RTMP，**不迁移采集源**：设备与授权绑定，等价于"同配置、新采集"）；`onContinue` 序列化、目标端 `onCreate` 捕获进 `pendingContinuation`、`initialize()` 应用；`module.json5` 加 `continuable:true`。重构顺手**修一个真 bug**：saveSettings 此前漏存 `sceneTransitionMs`（转场时长重启即丢）。跨设备迁移往返需第二台设备验收。C6 拖拽接收（UDMF drop）未动（需第二台设备才能验，且 UnifiedData 记录结构待细核）。
    - **真机冒烟（10-03 上午，设备 192.168.0.103:44939）**：C2 接收侧冷启动 `KnockShare: listening` **恰好 1 次**（pending 竞态锁实证，修复前此处双入口必现重复注册）；C2 发起侧走完"屏幕源→开始共享→录制→停止录制"，日志 `KnockShareOut: listening, payload=.../recording.mp4` 且成片真实落盘 436 KB；C6 被系统接管——`DSched_Service DMSContinueRecomMgr::GetAvailableRecommendListInternal get same bundle com.obsproject...` 证明 `continuable:true` 已进入系统接续推荐枚举。C3 端到端命中需小艺语音+真账号（人工操作），注册面 bm dump 无独立字段属正常（意图懒加载，调用时才装载 srcEntry）。前后台循环监听计数受 hdc 会话反复瞬断未竟，但冷启动单次注册与发起侧 arm 已覆盖状态机主干。
 2. **下批**：C1 碰一碰开播（先跑互通相机分辨率实测）→ 成功后 C2/C1 合并成"碰系列"叙事。
+   - **进度（10-03 上午）**：C6 拖拽接收闭环（ba42e0bc0，来源面板 allowDrop+onDrop，File/Image 记录→沙箱拷贝→image_source，单设备可验）；C1 **接收侧代码**闭环（521501c09）——相机插件把 `device_id="@remote"` 做成哨兵（优先选 CAMERA_CONNECTION_REMOTE，无对端设备时回退首相机并记日志），碰一碰接收侧新增 PLAIN_TEXT 能力收 `obs-knock://camera` 信令即建远程相机源，另加来源面板"远程相机"手动按钮。帧流与分辨率实测仍需同账号第二台设备（远程相机挂载本身是 Service Collaboration 系统能力，不在本应用内）。
 3. **上架后**：C5 实况窗权益申请（申请文案可复用 AGC 材料套路）+ C4 双机联调完整版。
 4. **长线**：C7 → C8。
 
