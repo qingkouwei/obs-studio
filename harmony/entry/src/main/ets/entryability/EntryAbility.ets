@@ -4,9 +4,11 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { Logger } from '../common/Logger';
 import { KnockShareReceiver } from '../common/KnockShareReceiver';
 import { KnockShareSender } from '../common/KnockShareSender';
+import { DirectorLink } from '../common/DirectorLink';
 import { ObsBridge } from '../napi/obsBridge';
 import { ObsAppState, ObsController } from '../model/ObsModel';
 import { ContinuationCodec } from '../common/Continuation';
+import { RecLiveWindow } from '../common/RecLiveWindow';
 
 /**
  * UIAbility for OBS on HarmonyOS PC (2in1).
@@ -227,9 +229,25 @@ export default class EntryAbility extends UIAbility {
 
   onDestroy(): void {
     Logger.info('onDestroy — shutting down libobs core and audio capture');
+    // W3 C5/C4: tear the live-window capsule and any director session down
+    // before the core dies (stopLiveView needs our process alive).
+    RecLiveWindow.stopRecording();
+    RecLiveWindow.stopStreaming();
+    DirectorLink.teardown('ability destroy');
     // Full teardown: stops streaming/recording even if the window closed
     // mid-broadcast, releases audio capturers and calls obs_shutdown().
     ObsBridge.shutdown();
+  }
+
+  onCollaborate(wantParam: Record<string, Object>): AbilityConstant.CollaborateResult {
+    // W3 C4: a phone (same account, or same AppID after discovery+binding)
+    // connected to this app through abilityConnectionManager — OBS becomes
+    // the director console's sink. Accept/decline is delegated to
+    // DirectorLink; we always AGREE to attempt the handshake and let the
+    // session creation reject internally on malformed parameters.
+    Logger.info('onCollaborate — director link handshake');
+    DirectorLink.onCollaborate(wantParam, this.context);
+    return 0; // CollaborateResult.AGREE
   }
 
   onForeground(): void {
