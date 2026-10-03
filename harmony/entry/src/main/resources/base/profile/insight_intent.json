@@ -1,0 +1,34 @@
+{
+  "insightIntents": [
+    {
+      "domain": "MediaDomain",
+      "intentName": "StartLive",
+      "intentVersion": "1.0.0",
+      "srcEntry": "./ets/insightintents/OBSIntentExecutor.ets",
+      "uiAbility": {
+        "ability": "EntryAbility",
+        "executeMode": [
+          "foreground"
+        ]
+      },
+      "displayName": "开始直播",
+      "displayDescription": "用已保存的推流配置立即开始直播",
+      "keywords": ["直播", "推流", "开播", "live", "stream"]
+    },
+    {
+      "domain": "MediaDomain",
+      "intentName": "StartRecording",
+      "intentVersion": "1.0.0",
+      "srcEntry": "./ets/insightintents/OBSIntentExecutor.ets",
+      "uiAbility": {
+        "ability": "EntryAbility",
+        "executeMode": [
+          "foreground"
+        ]
+      },
+      "displayName": "开始录制",
+      "displayDescription": "立即开始屏幕录制",
+      "keywords": ["录制", "录屏", "recording", "record"]
+    }
+  ]
+}

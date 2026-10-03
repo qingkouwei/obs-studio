@@ -4,6 +4,7 @@ import { ObsBridge, SystemAudioCapability } from '../napi/obsBridge';
 import { Logger } from '../common/Logger';
 import { LongRunningTask } from '../common/LongRunningTask';
 import { KnockShareSender } from '../common/KnockShareSender';
+import { IntentActions, IntentDispatcher, ObsActionKind } from '../insightintents/OBSIntentExecutor';
 import { ObsSettings, SettingsStore } from '../common/SettingsStore';
 import { common } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
@@ -227,6 +228,23 @@ export class ObsController {
     if (coreOk && context) {
       ObsController.loadSettings(context);
     }
+    // W3 C3: insight-intent bridge. Register the action handler and release
+    // anything the voice assistant queued while the core was still booting
+    // (cold start fires the executor before this line; warm start drains
+    // instantly).
+    IntentDispatcher.register((kind: ObsActionKind) => {
+      // The toggles are exactly that — toggles — so a voice "start" landing
+      // while already live would STOP. Guard: start intents are no-ops when
+      // the corresponding output is already running.
+      if (kind === 'StartLive' && !model.stats.streaming && model.coreReady) {
+        ObsController.toggleStreaming();
+      } else if (kind === 'StartRecording' && !model.stats.recording && model.coreReady) {
+        ObsController.toggleRecording();
+      } else {
+        Logger.info(`intent ${kind} ignored (busy or core not ready)`);
+      }
+    });
+    IntentActions.markReady();
   }
 
   /**
