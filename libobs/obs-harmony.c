@@ -74,7 +74,13 @@ static const char *harmony_code_root(void)
 	if (env && *env)
 		return env;
 
-	return "/data/app/el1/bundle/public/com.obsproject.studio.harmony/libs/arm64-v8a";
+	/* Bundle-name-agnostic fallback: the HAP public bundle directory is
+	 * <base>/libs/arm64-v8a (plugins) and <base>/resources/rawfile (data).
+	 * Hardcoding the old bundle name here broke module loading on the
+	 * 10-17 rename to com.qingkouwei.qinglu; callers set the real roots
+	 * via obs_harmony_set_paths() (bridge passes bundleCodeDir), this is
+	 * only the last resort. */
+	return "/data/app/el1/bundle/public/com.qingkouwei.qinglu/libs/arm64-v8a";
 }
 
 static const char *harmony_data_root(void)
@@ -88,7 +94,7 @@ static const char *harmony_data_root(void)
 	if (env && *env)
 		return env;
 
-	return "/data/app/el1/bundle/public/com.obsproject.studio.harmony/resources/rawfile";
+	return "/data/app/el1/bundle/public/com.qingkouwei.qinglu/resources/rawfile";
 }
 
 void add_default_module_paths(void)

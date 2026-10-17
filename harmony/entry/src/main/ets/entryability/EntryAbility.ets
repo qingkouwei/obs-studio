@@ -1,5 +1,5 @@
 import { UIAbility, AbilityConstant, Want, abilityAccessCtrl, Permissions } from '@kit.AbilityKit';
-import { window, promptAction, UIContext } from '@kit.ArkUI';
+import { window, promptAction, UIContext, display } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { Logger } from '../common/Logger';
 import { KnockShareReceiver } from '../common/KnockShareReceiver';
@@ -9,6 +9,7 @@ import { ObsBridge } from '../napi/obsBridge';
 import { ObsAppState, ObsController } from '../model/ObsModel';
 import { ContinuationCodec } from '../common/Continuation';
 import { RecLiveWindow } from '../common/RecLiveWindow';
+import { GlobalHotkey } from '../common/GlobalHotkey';
 
 /**
  * UIAbility for OBS on HarmonyOS PC (2in1).
@@ -31,7 +32,12 @@ const USER_GRANT_PERMISSIONS: Permissions[] = [
   // source: asking for the camera at launch when the user may never add one is
   // poor UX and invites review friction. Without a grant, Camera_Input_Open
   // fails with 7400102 (CAMERA_OPERATION_NOT_ALLOWED).
-  'ohos.permission.CAMERA'
+  'ohos.permission.CAMERA',
+  // user_grant (system_basic, auto-signing submits the ACL request like
+  // CUSTOM_SCREEN_RECORDING): the ability-collaboration channel behind the
+  // W3-C4 director remote. createAbilityConnectionSession throws 201 without
+  // a grant (SDK d.ts: INTERNET + GET/SET_NETWORK_INFO + DISTRIBUTED_DATASYNC).
+  'ohos.permission.DISTRIBUTED_DATASYNC'
   // NOTE: ohos.permission.CUSTOM_SCREEN_RECORDING and
   // ohos.permission.INPUT_MONITORING are RESTRICTED — they cannot be requested
   // at runtime and only work in release builds whose AGC-approved profile
@@ -72,21 +78,23 @@ export default class EntryAbility extends UIAbility {
         return;
       }
       Logger.info('main page loaded');
-      // A streaming/recording console wants the whole desktop. On PC/2in1 the
-      // window otherwise restores to a small floating size, which drops the
-      // UI into the stacked (< 1200vp) layout and clips the sources panel.
-      // Maximize once the content is up; failures are non-fatal (a plain
-      // tablet keeps its normal layout).
-      try {
-        const win = windowStage.getMainWindowSync();
-        win.maximize().then(() => {
-          Logger.info('main window maximized');
-        }).catch((e: BusinessError) => {
-          Logger.warn(`maximize skipped (code ${e.code})`);
-        });
-      } catch (e) {
-        Logger.warn('getMainWindowSync for maximize failed');
-      }
+      // Global hotkeys (Ctrl+Shift+R / Ctrl+Shift+S): registered only when
+      // the RESTRICTED INPUT_MONITORING grant is present, so a build without
+      // AGC approval silently keeps in-window shortcuts only.
+      GlobalHotkey.register(this.context);
+      // PC/2in1 window sizing — device forensics 10-03 (long session):
+      //   * maximize() grows the FRAME but the WM may never deliver the
+      //     matching resize to the ArkUI surface → everything right of the
+      //     old floating width renders black (dock + top bar).
+      //   * resize() is the only call proven to move the surface, but it
+      //     is rejected (1300002) while maximized, and a moveWindowTo()
+      //     issued right after a resize reverts the surface to its natural
+      //     size. The recover→resize→move dance therefore cannot be
+      //     trusted to leave frame and surface consistent.
+      // Decision: do not touch window geometry at all. The user maximizes
+      // from the title-bar button (system path, always coherent); the
+      // restored floating width (~2453 px = 1226 vp) still clears the
+      // 1200 vp desktop-layout breakpoint.
     });
 
     this.requestUserGrantPermissions();
@@ -172,10 +180,10 @@ export default class EntryAbility extends UIAbility {
         return;
       }
       const dialogOptions: promptAction.ShowDialogOptions = {
-        title: 'OBS is still live',
+        title: 'QingLu is still live',
         message: state.stats.streaming
-          ? 'You are streaming. Closing OBS will end the broadcast.'
-          : 'You are recording. Closing OBS will finalize and stop the recording.',
+          ? 'You are streaming. Closing QingLu will end the broadcast.'
+          : 'You are recording. Closing QingLu will finalize and stop the recording.',
         buttons: [
           { text: 'Cancel', color: '#9AA0A6' },
           { text: 'Stop and Close', color: '#E5484D' }
@@ -229,6 +237,9 @@ export default class EntryAbility extends UIAbility {
 
   onDestroy(): void {
     Logger.info('onDestroy — shutting down libobs core and audio capture');
+    // Global hotkeys outlive any single window; drop them first so no
+    // straggler keypress can reach a half-torn-down controller.
+    GlobalHotkey.unregister();
     // W3 C5/C4: tear the live-window capsule and any director session down
     // before the core dies (stopLiveView needs our process alive).
     RecLiveWindow.stopRecording();

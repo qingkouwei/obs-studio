@@ -9,7 +9,12 @@ target_sources(harmony-capture PRIVATE display-capture.c harmony-capture.c harmo
 # path; it is not part of the shared HarmonyOS::media group.
 harmony_find_ndk_library(HarmonyOS::native_buffer native_buffer)
 
-target_link_libraries(harmony-capture PRIVATE OBS::libobs HarmonyOS::media HarmonyOS::native_buffer)
+# oh_display_manager backs the "canvas follows the native panel" default in
+# both capture sources (window_manager/oh_display_manager.h, API 12+).
+harmony_find_ndk_library(HarmonyOS::display_manager native_display_manager)
+
+target_link_libraries(harmony-capture PRIVATE OBS::libobs HarmonyOS::media HarmonyOS::native_buffer
+                      HarmonyOS::display_manager)
 
 install_obs_data(harmony-capture data "obs-plugins/harmony-capture")
 

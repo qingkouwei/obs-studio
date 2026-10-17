@@ -1,4 +1,5 @@
 import { FilterItemModel, ObsAppState, ObsController } from '../model/ObsModel';
+import { PropertyPanel } from './PropertyPanel';
 
 /**
  * FilterPanel — per-source filter management for the selected source.
@@ -15,6 +16,9 @@ import { FilterItemModel, ObsAppState, ObsController } from '../model/ObsModel';
 @ComponentV2
 export struct FilterPanel {
   @Param @Require model: ObsAppState;
+  /** Generic property sheet for one filter (desktop filter-settings parity). */
+  @Local propSheetOpen: boolean = false;
+  @Local propFilterName: string = '';
 
   private typeLabel(typeId: string): string | Resource {
     switch (typeId) {
@@ -67,10 +71,26 @@ export struct FilterPanel {
                 .layoutWeight(1)
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
-              Button('×')
+              Button() {
+                /* literal-string Button labels render as grey blocks on this
+                 * device (10-04) — Text child instead. */
+                Text('⚙').fontSize(13).fontColor($r('app.color.obs_text_secondary'))
+              }
                 .type(ButtonType.Normal)
-                .fontSize(14)
-                .fontColor($r('app.color.obs_text_primary'))
+                .backgroundColor(Color.Transparent)
+                .borderRadius(4)
+                .width(24)
+                .height(22)
+                .onClick(() => {
+                  this.propFilterName = filter.name;
+                  this.propSheetOpen = true;
+                })
+              Button() {
+                /* literal-string Button labels render as grey blocks on this
+                 * device (10-04) — Text child instead. */
+                Text('×').fontSize(14).fontColor($r('app.color.obs_text_primary'))
+              }
+                .type(ButtonType.Normal)
                 .backgroundColor($r('app.color.obs_panel_border'))
                 .borderRadius(4)
                 .width(24)
@@ -94,7 +114,16 @@ export struct FilterPanel {
                 .height(24)
                 .margin({ right: 6, bottom: 6 })
                 .onClick(() => {
-                  ObsController.addFilterToSelectedSource(typeId);
+                  /* Native names the filter after its type id, so on success
+                   * we can open its property sheet right away — the user
+                   * complaint "滤镜面板没有看到 Gamma 等" was really "I added
+                   * a filter and still can't see its parameters": the panel
+                   * only ever showed add-buttons, the sliders lived one
+                   * hidden ⚙ tap away (10-13). */
+                  if (ObsController.addFilterToSelectedSource(typeId)) {
+                    this.propFilterName = typeId;
+                    this.propSheetOpen = true;
+                  }
                 })
             }, (typeId: string) => typeId)
           }
@@ -106,5 +135,32 @@ export struct FilterPanel {
       }
     }
     .width('100%')
+    /* Generic property sheet for the selected filter. Bound here (not on a
+     * per-row node) — one sheet instance, the filter name travels in state. */
+    .bindSheet($$this.propSheetOpen,
+      this.PropSheet(),
+      {
+        /* PC dialog size (10-12): MEDIUM clipped long property lists and the
+         * content collided with the system ✕. ✕ OFF (10-13 #3): the dim grey
+         * close glyph was unreadable and overlapped header content; the
+         * sheet has a full-width blue 关闭 button plus drag-bar/tap-outside. */
+        height: '80%',
+        width: 560,
+        dragBar: true,
+        showClose: false,
+        backgroundColor: $r('app.color.obs_background')
+      })
+  }
+
+  @Builder
+  PropSheet() {
+    PropertyPanel({
+      itemId: this.model.selectedSourceId,
+      filterName: this.propFilterName,
+      title: this.propFilterName,
+      onClose: () => {
+        this.propSheetOpen = false;
+      }
+    })
   }
 }

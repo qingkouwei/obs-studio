@@ -189,11 +189,13 @@ function(harmony_setup_platform_libraries)
   harmony_find_ndk_library(HarmonyOS::EGL EGL)
   harmony_find_ndk_library(HarmonyOS::GLESv3 GLESv3)
 
-  # Screen capture and codec
+  # Screen capture and codec (vdec powers the W4 remote-camera receiver).
   harmony_find_ndk_library(
     HarmonyOS::media
     native_avscreen_capture
     native_media_venc
+    native_media_vdec
+    native_media_adec
     native_media_codecbase
     native_media_core
   )

@@ -72,6 +72,7 @@ endif()
 add_library(obs_bridge SHARED
     napi_init.cpp
     obs_bridge.cpp
+    camera_sender.cpp
     xcomponent_surface.cpp
 )
 
@@ -88,8 +89,10 @@ target_link_libraries(obs_bridge PUBLIC
     libohaudio.so                       # OH_AudioCapturer: loopback + mic
     libnative_avscreen_capture.so       # OH_AVScreenCapture: display/window capture
     libnative_media_venc.so             # OH_VideoEncoder: hardware H.264/H.265
+    libnative_media_aenc.so             # OH_AudioEncoder: AAC for the wireless-camera mic track
     libnative_media_codecbase.so        # codec base types for the encoder
     libnative_media_core.so             # OH_Buffer etc. for codec payloads
+    libohcamera.so                      # Camera Kit NDK (wireless-camera sender)
     libdeviceinfo_ndk.z.so              # OH_GetSdkApiVersion (runtime API-level probe)
 )
 

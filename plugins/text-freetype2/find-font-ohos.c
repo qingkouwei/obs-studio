@@ -330,6 +330,47 @@ static bool family_already_listed(const char *family)
 	return false;
 }
 
+/* Does the face described by info actually carry CJK glyphs? Reopens it from
+ * its path+index and probes four representative code points (中 文 鸿 蒙).
+ * Two or more hits means it is a CJK-capable face; one stray hit in a symbol
+ * font does not. This is the guard the generic-family aliases need: the
+ * device ships no "HarmonyOS Sans" file at all (only FZ / Noto / FT faces),
+ * so a name-prefix pick falls through to array[0], a Latin face, and
+ * Chinese text then renders as blanks. */
+static bool info_has_cjk(const struct font_path_info *info)
+{
+	FT_Face face = NULL;
+	if (FT_New_Face(ft2_lib, info->path, info->index, &face) != 0 || face == NULL)
+		return false;
+
+	static const FT_ULong probes[] = {0x4E2D, 0x6587, 0x9E3F, 0x8499};
+	int hits = 0;
+	for (size_t i = 0; i < sizeof(probes) / sizeof(probes[0]); i++) {
+		if (FT_Get_Char_Index(face, probes[i]) != 0)
+			hits++;
+	}
+
+	FT_Done_Face(face);
+	return hits >= 2;
+}
+
+/* Alias preference score: higher wins. Sans-serif CJK faces first (the
+ * desktop "Sans Serif" answer), any other CJK face next, non-CJK last. */
+static int family_pick_score(const struct font_path_info *info)
+{
+	if (!info_has_cjk(info))
+		return 0;
+
+	const char *name = info->face_and_style;
+	/* Noto Sans CJK / HarmonyOS Sans SC / 方正黑体 are the sans CJK faces;
+	 * "Hei"(黑), "Sans" and "SC" are their reliable name markers on this
+	 * device's font directory. */
+	if (strstr(name, "Noto Sans CJK") != NULL || strstr(name, "Hei") != NULL ||
+	    astrcmpi_n(name, OHOS_PRIMARY_FAMILY, strlen(OHOS_PRIMARY_FAMILY)) == 0)
+		return 2;
+	return 1;
+}
+
 static void register_generic_families(void)
 {
 	const size_t prefix_len = strlen(OHOS_PRIMARY_FAMILY);
@@ -343,16 +384,30 @@ static void register_generic_families(void)
 	if (font_list.num == 0)
 		return;
 
-	/* Prefer the genuine HarmonyOS UI face; otherwise take the first face the
-	 * scan managed to open, which beats rendering nothing. */
+	/* Pick the face the generic aliases point at: highest CJK score, ties
+	 * broken by an exact "HarmonyOS Sans" name prefix, then by scan order.
+	 * Falls back to array[0] (the old behaviour) when nothing on the
+	 * device can render CJK at all. */
+	int best_score = -1;
 	for (size_t i = 0; i < font_list.num; i++) {
 		const struct font_path_info *info = &font_list.array[i];
 
-		if (info->face_len >= prefix_len && astrcmpi_n(info->face_and_style, OHOS_PRIMARY_FAMILY, prefix_len) == 0) {
+		const int score = family_pick_score(info);
+		const bool named_primary =
+			info->face_len >= prefix_len && astrcmpi_n(info->face_and_style, OHOS_PRIMARY_FAMILY, prefix_len) == 0;
+
+		if (score > best_score || (score == best_score && named_primary)) {
+			best_score = score;
 			pick = i;
-			break;
+			if (score == 2 && named_primary)
+				break; /* cannot do better than this */
 		}
 	}
+
+	if (best_score == 0)
+		blog(LOG_WARNING,
+		     "FT2-text: no CJK-capable face found among %zu, generic aliases fall back to a Latin face",
+		     (size_t)font_list.num);
 
 	/* Snapshot the fields by value before pushing: da_push_back() may
 	 * reallocate font_list.array and invalidate `primary`. The path string

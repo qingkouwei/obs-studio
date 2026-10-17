@@ -61,3 +61,15 @@ build-aux/flatpak-github-action-modified-*
 /harmony/entry/libs
 /harmony/**/oh_modules
 /harmony/**/.preview
+
+# 上架签名材料：私钥/证书/Profile 及其密码，绝不进公开仓库
+# （仓库是 public fork；出包走 sign-release.sh + 环境变量注入密码）
+/harmony/signing-release/
+*.p12
+*.p7b
+*.keystore
+
+# IDE / 本地工具配置（含绝对路径与机器信息，体积大）
+/harmony/.idea/
+/harmony/.clangd
+/harmony/.clang-tidy

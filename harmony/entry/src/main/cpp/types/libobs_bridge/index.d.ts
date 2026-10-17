@@ -26,12 +26,16 @@ export interface NativeSourceEntry {
   /** Source type id, e.g. "harmony_screen_capture", "image_source". */
   typeId: string;
   visible: boolean;
+  /** Scene-item lock (desktop lock icon): locked items ignore canvas drag/pinch. */
+  locked: boolean;
 }
 
-/** Audio track state reported by nativeGetAudioTracks(). */
+/** Audio mixer track reported by nativeGetAudioTracks(). One track per live
+ * OBS audio source (not a fixed shadow channel any more). */
 export interface NativeAudioTrack {
-  /** "desktop-audio" (loopback / 内录) or "mic-audio". */
+  /** The source's obs uuid — also the key for nativeSetMute/SetVolume. */
   id: string;
+  /** The source's display name (e.g. "麦克风 1", "桌面音频 1"). */
   name: string;
   muted: boolean;
   /** Linear 0.0 .. 1.0 */
@@ -77,6 +81,17 @@ export interface NativeFilterEntry {
 }
 
 /** Canvas geometry reported by nativeGetVideoInfo / accepted by nativeResetVideo. */
+export interface NativeCameraSenderStatus {
+  running: number;
+  connected: number;
+  failed: number;
+  /** 1 while the writer thread is in the exponential-backoff reconnect loop. */
+  reconnecting: number;
+  /** Attempts made since the last successful connection. */
+  retry: number;
+  host: string;
+}
+
 export interface NativeVideoInfo {
   width: number;
   height: number;
@@ -101,18 +116,66 @@ export interface ObsBridgeNative {
   /** Release the preview surface / EGL resources. */
   nativeDetachPreviewSurface(): void;
 
+  /** Studio mode: bind a scene to the private preview canvas (creates it on
+   * first call). The program canvas is untouched until takeScene/cutScene. */
+  nativeSetPreviewScene(id: string): boolean;
+  /** Scene uuid currently on the preview canvas ('' before studio mode). */
+  nativeGetPreviewSceneId(): string;
+  /** Attach the second display rendering the preview canvas (needs
+   * nativeSetPreviewScene first). */
+  nativeAttachStudioPreviewSurface(xcomponentId: string): boolean;
+  nativeDetachStudioPreviewSurface(): void;
+
   nativeGetScenes(): NativeSceneEntry[];
   /** Returns the new scene id, or "" on failure. */
   nativeCreateScene(name: string): string;
   nativeRemoveScene(id: string): boolean;
+  nativeRenameScene(id: string, name: string): boolean;
 
   nativeGetSources(sceneId: string): NativeSourceEntry[];
   /** Returns the new scene-item id, or "" on failure. settingsJson is an obs_data JSON object. */
   nativeAddSource(sceneId: string, typeId: string, name: string, settingsJson: string): string;
   nativeRemoveSource(id: string): boolean;
   nativeSetSourceVisible(id: string, visible: boolean): boolean;
+  /** Item bounding box in canvas px as JSON '{"x","y","w","h"}'; '' if gone. */
+  nativeGetSourceBounds(id: string): string;
+  /** Canvas-px top-left position of the item. */
+  nativeSetSourcePosition(id: string, x: number, y: number): boolean;
+  /** Absolute rendered rect in canvas px (corner-handle resize). */
+  nativeSetSourceRect(id: string, x: number, y: number, w: number, h: number): boolean;
+  /** Uniform scale multiplier applied to the item's current scale. */
+  nativeScaleSourceBy(id: string, factor: number): boolean;
+  nativeSetSourceTransform(id: string, rotDeg: number, flipX: boolean, flipY: boolean): boolean;
+  nativeGetSourceTransform(id: string): string;
+  nativeSetSourceBoundsFit(id: string, mode: string): boolean;
+  nativeSetSourceSize(id: string, w: number, h: number): boolean;
+  nativeSetSourceLocked(id: string, locked: boolean): boolean;
+  nativeSetSourceOrder(id: string, dir: string): boolean;
+  nativeDuplicateSource(id: string): string;
+  nativeRenameSource(id: string, name: string): boolean;
+
+  /** W3-C1 wireless-camera sender (phone role; independent of libobs).
+   * Throws when the producer is unreachable or the camera pipeline fails. */
+  nativeStartCameraSender(host: string, port: number, bitrateKbps: number): boolean;
+  nativeStopCameraSender(): boolean;
+  nativeCameraSenderStatus(): NativeCameraSenderStatus;
+  nativeWebSourceFeed(itemId: string, width: number, height: number, rgba: ArrayBuffer, timestampNs: number): boolean;
+  nativeGetSourceSettings(itemId: string): string;
+  nativeSetSourceSettings(itemId: string, settingsJson: string): boolean;
+  nativeMediaControl(id: string, action: string): boolean;
+  nativeGetMediaState(id: string): string;
+  nativeMediaSeek(id: string, ms: number): boolean;
+  nativeGetSourceAudioProps(id: string): string;
+  nativeSetSourceAudioProps(id: string, syncOffsetMs: number, monitoringType: number): boolean;
+  /** JSON property descriptors for the generic settings renderer. */
+  nativeGetPropertySchema(itemId: string, filterName: string): string;
+  nativeSetFilterSettings(itemId: string, filterName: string, settingsJson: string): boolean;
   /** Bind the program channel (channel 0) to another scene — the "scene cut". */
   nativeSelectScene(id: string, durationMs: number): boolean;
+  /** JSON array [{"id","name"}] of registered transition types ('[]' shell). */
+  nativeGetTransitionTypes(): string;
+  /** Swap the program transition shell to another transition type. */
+  nativeSetTransitionType(id: string): boolean;
 
   /** Current canvas geometry (base size + fps). */
   nativeGetVideoInfo(): NativeVideoInfo;
@@ -139,6 +202,15 @@ export interface ObsBridgeNative {
    * assuming. Combine with canIUse() on the ArkTS side.
    */
   nativeCanCaptureSystemAudio(): boolean;
+
+  /**
+   * Lazy desktop-loopback starter. NativeInit no longer requests playback
+   * capture at boot (the system privacy dialog is session-scoped and popped
+   * on EVERY cold start). Call this when the user actually adds the desktop
+   * audio source; idempotent, fire-and-forget (authorization result lands in
+   * the track state polled by the mixer).
+   */
+  nativeEnsureDesktopAudio(): boolean;
 
   /** configJson keys: "server" (rtmp URL), "key" (stream key), "videoBitrateKbps", "audioBitrateKbps". */
   nativeStartStreaming(configJson: string): boolean;

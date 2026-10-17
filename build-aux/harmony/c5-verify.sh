@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # C5 live-window verification — robust against the device dropping its
 # wireless session mid-run. Each step re-establishes the hdc connection.
-DEV="192.168.0.100:35565"
+DEV="${OBS_HARMONY_DEVICE:-192.168.0.100:35565}"
 BUNDLE="com.obsproject.studio.harmony"
 HAP="/Users/shen/Documents/commission/OBS/obs-studio/harmony/entry/build/default/outputs/default/entry-default-signed.hap"
-HDC=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc
+HDC="${HDC:-/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc}"
 
 conn(){ timeout 12 $HDC tconn $DEV >/dev/null 2>&1; }
 shell(){ conn; timeout 15 $HDC shell "$@" 2>/dev/null | tr -d '\r'; }

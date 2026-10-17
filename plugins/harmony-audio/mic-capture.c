@@ -63,6 +63,19 @@ static const char *mic_capture_get_name(void *unused)
 	return obs_module_text("HarmonyMicCapture");
 }
 
+/* Mirror capture state into the source's private settings for the ArkTS
+ * mixer chip (codes match the bridge's CaptureState: 1 Idle, 3 Running,
+ * 5 Failed). Same mechanism as desktop-audio's loopback authorization
+ * reporting; obs_data is internally locked so this is thread-safe. */
+static void mic_capture_publish(struct harmony_mic_capture *mic, long long code)
+{
+	obs_data_t *ps = obs_source_get_private_settings(mic->source);
+	if (ps == NULL)
+		return;
+	obs_data_set_int(ps, "harmony_capture_state", code);
+	obs_data_release(ps);
+}
+
 static enum speaker_layout channels_to_speaker_layout(uint32_t channels)
 {
 	switch (channels) {
@@ -310,6 +323,7 @@ static bool mic_capture_start(struct harmony_mic_capture *mic)
 
 fail:
 	pthread_mutex_unlock(&mic->mutex);
+	mic_capture_publish(mic, success ? 3 : 5);
 	return success;
 }
 
@@ -325,6 +339,8 @@ static void mic_capture_stop(struct harmony_mic_capture *mic)
 	mic->active = false;
 
 	pthread_mutex_unlock(&mic->mutex);
+
+	mic_capture_publish(mic, 1); // Idle: no longer capturing
 
 	if (capturer == NULL)
 		return;

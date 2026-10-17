@@ -2,7 +2,7 @@
   app: {
     signingConfigs: [
       {
-        name: 'default',
+        name: 'debug',
         type: 'HarmonyOS',
         material: {
           certpath: '/Users/shen/.ohos/config/default_harmony_Gh1PMNW89mgwOCbZ2K6lWAoE3gdimIZE4u5SLp6uEY=.cer',
@@ -12,6 +12,24 @@
           signAlg: 'SHA256withECDSA',
           storeFile: '/Users/shen/.ohos/config/default_harmony_Gh1PMNW89mgwOCbZ2K6lWAoE3gdimIZE4u5SLp6uEY=.p12',
           storePassword: '0000001bbdf4ced0f4e9a7b22a1cf0c29e431f45262f1634639361c4dfa2cbef1ba81a4bc681156e33ad99',
+        },
+      },
+      // NOTE: the release signingConfig is intentionally NOT kept here — the
+      // repository is a public fork and this file is tracked, so plaintext
+      // keystore passwords would leak on push. Release signing runs through
+      // harmony/sign-release.sh, which reads the password from the
+      // QINGLU_KEYSTORE_PWD environment variable.
+      {
+        name: 'default',
+        type: 'HarmonyOS',
+        material: {
+          certpath: '/Users/shen/.ohos/config/default_harmony_Gh1PMNW89mgwOCbZ2K6lWAoE3gdimIZE4u5SLp6uEY=.cer',
+          keyAlias: 'debugKey',
+          keyPassword: '0000001bb572470dc9047767d237b9735fd2041762fa10c69daf61c6ea3ce72115478316f3b4e81cdc1b92',
+          profile: '/Users/shen/.ohos/config/default_harmony_Gh1PMNW89mgwOCbZ2K6lWAoE3gdimIZE4u5SLp6uEY=.p7b',
+          signAlg: 'SHA256withECDSA',
+          storeFile: '/Users/shen/.ohos/config/default_harmony_Gh1PMNW89mgwOCbZ2K6lWAoE3gdimIZE4u5SLp6uEY=.p12',
+          storePassword: '0000001bb572470dc9047767d237b9735fd2041762fa10c69daf61c6ea3ce72115478316f3b4e81cdc1b92',
         },
       },
     ],

@@ -2,39 +2,39 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "OBS Studio frontend for HarmonyOS PC"
+      "value": "QingLu live production suite for HarmonyOS"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "OBS Studio main window: scene mixing, streaming and recording"
+      "value": "QingLu main window: scene mixing, streaming and recording"
     },
     {
       "name": "EntryAbility_label",
-      "value": "OBS Studio"
+      "value": "QingLu"
     },
     {
       "name": "reason_microphone",
-      "value": "OBS captures microphone audio as a source for your stream or recording."
+      "value": "QingLu captures microphone audio as a source for your stream or recording."
     },
     {
       "name": "reason_camera",
-      "value": "OBS captures your camera as a video source for your stream or recording."
+      "value": "QingLu captures your camera as a video source for your stream or recording."
     },
     {
       "name": "reason_background",
-      "value": "Keeps an active broadcast running while the OBS window is minimized or in the background."
+      "value": "Keeps an active recording or broadcast running while the QingLu window is minimized or in the background."
     },
     {
       "name": "reason_screen_capture",
-      "value": "OBS captures the display or a window as a video source for your stream or recording."
+      "value": "QingLu captures the display or a window as a video source for your stream or recording."
     },
     {
       "name": "reason_screen_recording",
-      "value": "OBS records the screen for your stream or recording."
+      "value": "QingLu records the screen into your broadcast or a local video file."
     },
     {
       "name": "reason_input_monitoring",
-      "value": "OBS monitors input to show active speaking indicators."
+      "value": "Lets QingLu respond to global hotkeys while it is not focused (Ctrl+Shift+R recording, Ctrl+Shift+S streaming). QingLu never records what you type."
     },
     {
       "name": "app_subtitle",
@@ -195,6 +195,66 @@
     {
       "name": "notice_record_fail",
       "value": "Failed to start recording — check the output path and the log."
+    },
+    {
+      "name": "settings_export_album",
+      "value": "Export last recording to album"
+    },
+    {
+      "name": "works_title",
+      "value": "Works"
+    },
+    {
+      "name": "works_close",
+      "value": "Close"
+    },
+    {
+      "name": "works_back",
+      "value": "Back"
+    },
+    {
+      "name": "works_empty",
+      "value": "No recordings yet"
+    },
+    {
+      "name": "works_play",
+      "value": "Preview"
+    },
+    {
+      "name": "works_export",
+      "value": "Export"
+    },
+    {
+      "name": "works_delete",
+      "value": "Delete"
+    },
+    {
+      "name": "stream_history",
+      "value": "History"
+    },
+    {
+      "name": "stream_history_empty",
+      "value": "No saved stream targets"
+    },
+    {
+      "name": "stream_key_hint",
+      "value": "Stream key (eye icon reveals)"
+    },
+    {
+      "name": "mixer_empty",
+      "value": "No audio sources yet — add a mic or desktop audio to control levels here"
+    },
+    {
+      "name": "notice_export_none",
+      "value": "No finished recording to export."
+    },
+    {
+      "name": "notice_export_done",
+      "value": "Recording exported to the album."
+    },
+    {
+      "name": "notice_export_fail",
+      "value": "Album export failed — see the log."
     },
     {
       "name": "st_unsupported",
@@ -359,6 +419,194 @@
     {
       "name": "src_remote_camera",
       "value": "Remote Cam"
+    },
+    {
+      "name": "notice_settings_applied",
+      "value": "Settings applied"
+    },
+    {
+      "name": "notice_settings_failed",
+      "value": "Failed to apply settings"
+    },
+    {
+      "name": "src_media",
+      "value": "Media"
+    },
+    {
+      "name": "notice_dup_fail",
+      "value": "Failed to duplicate source"
+    },
+    {
+      "name": "studio_toggle",
+      "value": "Studio"
+    },
+    {
+      "name": "studio_preview_label",
+      "value": "Preview"
+    },
+    {
+      "name": "studio_program_label",
+      "value": "Program"
+    },
+    {
+      "name": "studio_take",
+      "value": "Take"
+    },
+    {
+      "name": "studio_cut",
+      "value": "Cut"
+    },
+    {
+      "name": "transition_title",
+      "value": "Transitions"
+    },
+    {
+      "name": "transition_duration",
+      "value": "Duration"
+    },
+    {
+      "name": "transition_unavailable",
+      "value": "No transitions available (plugin not loaded)"
+    },
+    {
+      "name": "notice_transition_fail",
+      "value": "Failed to switch transition type"
+    },
+    {
+      "name": "src_slideshow",
+      "value": "Slideshow"
+    },
+    {
+      "name": "src_color",
+      "value": "Color"
+    },
+    {
+      "name": "confirm_title",
+      "value": "Confirm"
+    },
+    {
+      "name": "confirm_ok",
+      "value": "OK"
+    },
+    {
+      "name": "confirm_cancel",
+      "value": "Cancel"
+    },
+    {
+      "name": "confirm_start_stream",
+      "value": "Start streaming?"
+    },
+    {
+      "name": "confirm_stop_stream",
+      "value": "Stop streaming?"
+    },
+    {
+      "name": "confirm_start_record",
+      "value": "Start recording?"
+    },
+    {
+      "name": "confirm_stop_record",
+      "value": "Stop recording?"
+    },
+    {
+      "name": "set_general",
+      "value": "General"
+    },
+    {
+      "name": "set_video",
+      "value": "Video"
+    },
+    {
+      "name": "set_record",
+      "value": "Recording"
+    },
+    {
+      "name": "set_stream",
+      "value": "Streaming"
+    },
+    {
+      "name": "set_snap_enable",
+      "value": "Enable source snapping"
+    },
+    {
+      "name": "set_snap_threshold",
+      "value": "Snap sensitivity"
+    },
+    {
+      "name": "set_snap_edges",
+      "value": "Snap to screen edges"
+    },
+    {
+      "name": "set_confirm_group",
+      "value": "Output confirmations"
+    },
+    {
+      "name": "set_confirm_start_record",
+      "value": "Confirm when starting recording"
+    },
+    {
+      "name": "set_confirm_stop_record",
+      "value": "Confirm when stopping recording"
+    },
+    {
+      "name": "set_confirm_start_stream",
+      "value": "Confirm when starting streaming"
+    },
+    {
+      "name": "set_confirm_stop_stream",
+      "value": "Confirm when stopping streaming"
+    },
+    {
+      "name": "set_auto_record",
+      "value": "Automatically record when streaming"
+    },
+    {
+      "name": "set_snap_group",
+      "value": "Source snapping"
+    },
+    {
+      "name": "set_auto_stop_record",
+      "value": "Automatically stop recording when streaming stops"
+    },
+    {
+      "name": "set_guides_group",
+      "value": "Preview guides"
+    },
+    {
+      "name": "set_guide_safe",
+      "value": "Safe areas (action 90% / title 80%)"
+    },
+    {
+      "name": "set_guide_center",
+      "value": "Centre cross"
+    },
+    {
+      "name": "set_guide_scale",
+      "value": "Ratio boxes (4:3 / 1:1 / 4:5)"
+    },
+    {
+      "name": "set_keys",
+      "value": "Shortcuts"
+    },
+    {
+      "name": "key_scene_n",
+      "value": "Digits 1-9: switch scene"
+    },
+    {
+      "name": "key_ctrl_r",
+      "value": "Ctrl+R: toggle recording"
+    },
+    {
+      "name": "key_ctrl_f",
+      "value": "Ctrl+F: toggle streaming"
+    },
+    {
+      "name": "key_arrows",
+      "value": "Arrows: nudge selection (Shift=10px)"
+    },
+    {
+      "name": "key_del",
+      "value": "Delete: remove selected source"
     }
   ]
 }

@@ -13,7 +13,7 @@
       },
       "displayName": "开始直播",
       "displayDescription": "用已保存的推流配置立即开始直播",
-      "keywords": ["直播", "推流", "开播", "live", "stream"]
+      "keywords": ["轻录", "直播", "推流", "开播", "live", "stream"]
     },
     {
       "domain": "MediaDomain",
@@ -28,7 +28,7 @@
       },
       "displayName": "开始录制",
       "displayDescription": "立即开始屏幕录制",
-      "keywords": ["录制", "录屏", "recording", "record"]
+      "keywords": ["轻录", "录制", "录屏", "recording", "record"]
     }
   ]
 }
