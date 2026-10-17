@@ -137,3 +137,32 @@ track state machine surfaces honestly (never faked as Running).
 - **Global hotkeys** (`INPUT_MONITORING`), settings/profile dialogs, and full source
   property editing are out of scope for this scaffold (transport has inline RTMP inputs only).
 - Icons under `resources/base/media/` are generated placeholders, not final OBS artwork.
+
+## Release signing — private material, public repo
+
+This repository is a **public** fork, so nothing that can sign an app as "轻录直录播软件"
+(QingLu, `com.qingkouwei.qinglu`) lives here:
+
+| Item | Where it lives |
+|---|---|
+| Release keystore (`.p12`), AGC release cert chain (`.cer`), release profile (`.p7b`), plaintext keystore password | a **separate private repository** on the maintainer's machine (`~/code/HarmonyOS/qinglu-signing`), never pushed anywhere public |
+| `build-profile.json5` release `signingConfig` | intentionally absent — only the DevEco-generated debug/default configs remain (they reference files under `~/.ohos/config`, harmless, and DevEco regenerates them per machine) |
+| `sign-release.sh` | reads the password from `$QINGLU_KEYSTORE_PWD` and the material dir from `$QINGLU_SIGNING_DIR`; fails fast if either is missing |
+
+`.gitignore` also blocks `*.p12`, `*.p7b`, `*.keystore` and `/harmony/signing-release/`
+globally, so a careless `git add -A` cannot leak them.
+
+To produce the AGC upload artifact:
+
+```bash
+source ~/code/HarmonyOS/qinglu-signing/env.sh      # exports QINGLU_SIGNING_DIR + QINGLU_KEYSTORE_PWD
+cd harmony && ./sign-release.sh                     # hvigor assembleApp → hap-sign-tool sign-app → verify-app
+# → harmony/build/outputs/default/qinglu-release.app
+```
+
+The certificate/profile are valid 2026-10-17 → 2029-10-17.
+
+## Licence note
+
+The repo root `COPYING` is OBS Studio's GPL v2. The ArkUI shell links `libobs` in-process
+through NAPI, so this port is a derivative work and is published under the same GPL v2.
