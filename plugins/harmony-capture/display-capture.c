@@ -34,6 +34,7 @@
 #include <multimedia/player_framework/native_avscreen_capture_base.h>
 #include <multimedia/player_framework/native_avbuffer.h>
 #include <native_buffer/native_buffer.h>
+#include <window_manager/oh_display_manager.h>
 
 #define LOG_PREFIX "[harmony display capture] "
 
@@ -49,6 +50,21 @@ struct harmony_display_capture {
 
 	bool running;
 };
+
+/* See window-capture.c: same rationale — canvas follows the physical panel. */
+static void harmony_native_display_size(uint32_t *width, uint32_t *height)
+{
+	int32_t w = 0, h = 0;
+
+	if (OH_NativeDisplayManager_GetDefaultDisplayWidth(&w) == DISPLAY_MANAGER_OK &&
+	    OH_NativeDisplayManager_GetDefaultDisplayHeight(&h) == DISPLAY_MANAGER_OK && w > 0 && h > 0) {
+		*width = (uint32_t)w;
+		*height = (uint32_t)h;
+	} else {
+		*width = 1920;
+		*height = 1080;
+	}
+}
 
 static const char *display_capture_get_name(void *unused)
 {
@@ -327,6 +343,8 @@ static void display_capture_update_internal(struct harmony_display_capture *cap,
 	cap->display_id = (uint64_t)obs_data_get_int(settings, "display_id");
 	cap->width = (uint32_t)obs_data_get_int(settings, "width");
 	cap->height = (uint32_t)obs_data_get_int(settings, "height");
+	if (cap->width == 0 || cap->height == 0)
+		harmony_native_display_size(&cap->width, &cap->height);
 	cap->frame_rate = (int)obs_data_get_int(settings, "frame_rate");
 	cap->capture_cursor = obs_data_get_bool(settings, "capture_cursor");
 
@@ -393,12 +411,14 @@ static uint32_t display_capture_get_height(void *data)
 
 static void display_capture_get_defaults(obs_data_t *settings)
 {
-	/* The NDK exposes no display-metrics API to query the physical screen
-	 * resolution (no native_display_manager header exists in the sysroot),
-	 * so the canvas size is a user setting that defaults to 1080p. */
+	/* 0 = follow the native display (resolved via the display manager at
+	 * update time). The old comment in this file claiming the NDK exposes
+	 * no display-metrics API is outdated: window_manager/oh_display_manager.h
+	 * (API 12+) provides it. Declaring the real panel size means the
+	 * captured screen is 1:1, no downscale to 1080p in the service. */
 	obs_data_set_default_int(settings, "display_id", 0);
-	obs_data_set_default_int(settings, "width", 1920);
-	obs_data_set_default_int(settings, "height", 1080);
+	obs_data_set_default_int(settings, "width", 0);
+	obs_data_set_default_int(settings, "height", 0);
 	obs_data_set_default_int(settings, "frame_rate", 30);
 	obs_data_set_default_bool(settings, "capture_cursor", true);
 }
@@ -432,8 +452,15 @@ static void display_capture_update(void *data, obs_data_t *settings)
 	const uint32_t old_height = cap->height;
 
 	const uint64_t new_display_id = (uint64_t)obs_data_get_int(settings, "display_id");
-	const uint32_t new_width = (uint32_t)obs_data_get_int(settings, "width");
-	const uint32_t new_height = (uint32_t)obs_data_get_int(settings, "height");
+	uint32_t new_width = (uint32_t)obs_data_get_int(settings, "width");
+	uint32_t new_height = (uint32_t)obs_data_get_int(settings, "height");
+	/* Resolve 0 ("follow the native display") BEFORE comparing: cap->width
+	 * was already resolved at create/update time, so a raw 0-vs-native
+	 * comparison would fake a change and restart the capture — which in
+	 * user_grant mode means a second authorization prompt (the known
+	 * "restart pops the confirmation again" trap). */
+	if (new_width == 0 || new_height == 0)
+		harmony_native_display_size(&new_width, &new_height);
 
 	const bool needs_restart = (new_display_id != old_display_id) ||
 				   (new_width != old_width) || (new_height != old_height);

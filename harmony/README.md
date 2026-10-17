@@ -1,7 +1,7 @@
 # OBS Studio — HarmonyOS ArkUI frontend (scaffold)
 
 Native ArkUI/ArkTS rewrite of the OBS frontend for **HarmonyOS PC (2in1)**, API 26 /
-platformVersion 26.0.0, bundle `com.obsproject.studio.harmony`. The ~85.5 kLOC Qt6 Widgets
+platformVersion 26.0.0, bundle `com.qingkouwei.qinglu`. The ~85.5 kLOC Qt6 Widgets
 frontend in `../frontend/` is **not** ported; instead this ArkUI shell drives the existing C
 core (`libobs`) through a Node-API (NAPI) bridge.
 
@@ -87,7 +87,7 @@ cd harmony
 
 # sign (DevEco auto-sign, or a release profile), then:
 hdc install entry-default-signed.hap
-hdc shell aa start -a EntryAbility -b com.obsproject.studio.harmony
+hdc shell aa start -a EntryAbility -b com.qingkouwei.qinglu
 ```
 
 Signing is skipped without a cert (`hvigor WARN: Will skip sign 'hos_hap'`); the produced

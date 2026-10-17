@@ -106,7 +106,11 @@ static bool load_cached_font_list(struct serializer *s)
 }
 
 extern uint32_t get_font_checksum();
-static const uint32_t font_cache_ver = 1;
+/* v2: the OHOS back end's generic-family pick now scores faces by CJK glyph
+ * coverage instead of taking the first name match; the font-directory
+ * checksum cannot see that logic change, so the version bump is what
+ * invalidates caches written by the old picker. */
+static const uint32_t font_cache_ver = 2;
 
 bool load_cached_os_font_list(void)
 {

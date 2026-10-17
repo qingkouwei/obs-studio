@@ -44,6 +44,18 @@ bool AttachPreview(const std::string &xcomponentId);
 /** Tear down the preview surface/EGL resources. Safe to call when detached. */
 void DetachPreview();
 
+/**
+ * Studio mode: attach a SECOND display that renders the private preview
+ * canvas instead of the program/main canvas. `canvas` is an obs_canvas_t*
+ * (void* keeps this header free of the libobs include); the draw callback
+ * calls obs_render_canvas_texture(canvas) for this surface while the primary
+ * keeps obs_render_main_texture(). Independent of AttachPreview's singleton.
+ */
+bool AttachStudioPreview(const std::string &xcomponentId, void *canvas);
+
+/** Tear down the studio-preview display. Safe to call when detached. */
+void DetachStudioPreview();
+
 /** True while a preview surface is attached and live. */
 bool PreviewAttached();
 

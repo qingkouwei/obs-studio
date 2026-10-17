@@ -35,6 +35,24 @@
         "name": "ohos.permission.INTERNET"
       },
       {
+        // normal (system_grant): required by abilityConnectionManager.connect()
+        // for the W3-C4 director remote (phone -> producer).
+        "name": "ohos.permission.GET_NETWORK_INFO"
+      },
+      {
+        "name": "ohos.permission.SET_NETWORK_INFO"
+      },
+      {
+        // user_grant: Ability collaboration channel (C4 director console).
+        // createAbilityConnectionSession/connect() reject with 201 without it.
+        "name": "ohos.permission.DISTRIBUTED_DATASYNC",
+        "reason": "$string:reason_distributed",
+        "usedScene": {
+          "abilities": ["EntryAbility"],
+          "when": "inuse"
+        }
+      },
+      {
         // user_grant: requested at runtime via requestPermissionsFromUser().
         "name": "ohos.permission.MICROPHONE",
         "reason": "$string:reason_microphone",
@@ -94,8 +112,8 @@
         }
       },
       {
-        // RESTRICTED (system_basic): global hotkeys (Start/Stop streaming,
-        // Push-to-Talk) while OBS is not focused. Requires AGC review
+        // RESTRICTED (system_basic): global hotkeys (Start/Stop recording,
+        // Start/Stop streaming) while QingLu is not focused. Requires AGC review
         // (~3 working days). Without it, hotkeys only work in-app and the
         // global hotkey feature must stay disabled.
         "name": "ohos.permission.INPUT_MONITORING",
@@ -123,8 +141,16 @@
         // without an audioRecording continuous task the suspend manager kills
         // the process at screen-off with
         // ILLEGAL_AUDIO_CAPTURER_BY_SUSPEND (verified on device 2026-10-02).
+        // dataTransfer: RTMP push is unmanaged socket I/O — the official
+        // continuous-task consistency check suspends a background process
+        // that streams network data under an audio-only declaration
+        // (10-16 user report: streaming killed on background).
+        // taskKeeping: compositing + hardware encoding load exceeds the
+        // audio-only profile; no ACL needed on PC/2in1 (docs table 1).
         "backgroundModes": [
-          "audioRecording"
+          "audioRecording",
+          "dataTransfer",
+          "taskKeeping"
         ],
         "icon": "$media:icon",
         "label": "$string:EntryAbility_label",

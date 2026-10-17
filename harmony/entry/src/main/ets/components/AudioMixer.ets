@@ -2,16 +2,17 @@ import { AudioTrackModel, CaptureState, ObsAppState, ObsController } from '../mo
 
 /**
  * AudioMixer — per-track level meters (peak + RMS), volume faders and mute
- * toggles for the desktop-loopback and microphone tracks.
+ * toggles for the live audio SOURCE tracks.
  *
- * Levels come from REAL captured PCM: the native bridge computes peak/RMS in
- * the OH_AudioCapturer read callback, and the page polls
- * nativeGetOutputLevels() on a 200 ms timer — this works even in shell-only
- * builds (no libobs required).
+ * The mixer is source-driven (refactor 10-17): nativeGetAudioTracks()
+ * enumerates every OBS source carrying audio and returns one track per source,
+ * keyed by the source uuid. Levels come from an attached obs_volmeter (real
+ * libobs program audio), and mute/volume write straight back to the source —
+ * so the meters and faders now reflect and control exactly what the
+ * recording/stream carries, unlike the old shadow-capturer "phantom mixer".
  *
- * The desktop track surfaces the loopback probe/authorization state honestly:
- * Requesting (async privacy dialog pending), NotAuthorized (user denied),
- * Unsupported (PC/2in1 syscap probe failed) — never pretended to be Running.
+ * A source only appears here once it is actually in a scene; with no audio
+ * sources the mixer is empty. Idle (not-yet-active) sources show a state chip.
  */
 @ComponentV2
 export struct AudioMixer {
@@ -49,7 +50,7 @@ export struct AudioMixer {
       case CaptureState.NotAuthorized:
         return $r('app.string.st_notauthorized');
       case CaptureState.Failed:
-        return track.id === 'mic-audio' ? $r('app.string.st_micdenied') : $r('app.string.st_capture_failed');
+        return $r('app.string.st_capture_failed');
       case CaptureState.Idle:
         return $r('app.string.st_idle');
       default:
@@ -79,13 +80,26 @@ export struct AudioMixer {
       .width('100%')
 
       Row({ space: 12 }) {
+        if (this.model.audioTracks.length === 0) {
+          // Source-driven mixer: no tracks until the scene holds an audio
+          // source (mic / desktop audio / wireless camera with audio).
+          Text($r('app.string.mixer_empty'))
+            .fontSize(11)
+            .fontColor($r('app.color.obs_text_secondary'))
+            .width('100%')
+            .padding({ top: 4 })
+        }
         ForEach(this.model.audioTracks, (track: AudioTrackModel) => {
           Column({ space: 4 }) {
             Row({ space: 6 }) {
-              Text(track.id === 'desktop-audio' ? $r('app.string.track_desktop') :
-                (track.id === 'mic-audio' ? $r('app.string.track_mic') : track.name))
+              // Track id is now the source uuid; the display name comes
+              // straight from the source (e.g. "麦克风 1").
+              Text(track.name)
                 .fontSize(12)
                 .fontColor($r('app.color.obs_text_primary'))
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .layoutWeight(1)
               if (track.state !== CaptureState.Running) {
                 Text(this.stateLabel(track))
                   .fontSize(10)

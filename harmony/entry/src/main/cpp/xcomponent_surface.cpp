@@ -45,6 +45,11 @@ struct SurfaceRecord {
     uint64_t width = 0;
     uint64_t height = 0;
     bool isPreview = false;
+    /* Studio mode: this record is the SECOND display, rendering the private
+     * preview canvas (studioCanvas, an obs_canvas_t*) instead of the main
+     * canvas. Independent of the isPreview singleton above. */
+    bool isStudio = false;
+    void *studioCanvas = nullptr;
 
     // Shell-mode EGL seam (used when HAVE_LIBOBS is undefined). When the core
     // is linked, libobs's graphics subsystem owns the EGL surface instead and
@@ -63,6 +68,9 @@ struct SurfaceRecord {
 std::mutex g_mutex;
 std::vector<std::unique_ptr<SurfaceRecord>> g_records;
 SurfaceRecord *g_preview = nullptr;
+/* Studio-mode second display (preview canvas). Records live in g_records
+ * for the process lifetime, so the draw-callback param stays valid. */
+SurfaceRecord *g_studio = nullptr;
 
 SurfaceRecord *FindByComponentLocked(OH_NativeXComponent *component)
 {
@@ -90,10 +98,43 @@ void QuerySize(SurfaceRecord *rec)
 void ObsDisplayDrawCallback(void *param, uint32_t cx, uint32_t cy)
 {
     // Called by libobs on its graphics thread with the display's GL context
-    // current; compositing the program/preview output is one call.
-    obs_render_main_texture();
+    // current; compositing the program/preview output is one call. In studio
+    // mode the second display draws the private preview canvas instead of
+    // the main (program) canvas — obs_render_canvas_texture() takes the same
+    // "blit the mix's render texture" path for any canvas.
+    //
+    /* Aspect-fit + centre the canvas into the surface, mirroring the desktop
+     * preview. render_display_begin left the projection at gs_ortho(0,cx,0,cy)
+     * and obs_render_main_texture blits the render_texture at its NATIVE base
+     * size anchored at (0,0) — so without this the canvas is drawn 1:1-px in
+     * the top-left corner, and whenever surface px ≠ base px the picture
+     * neither fills nor centres (user report 10-14: selection box far bigger
+     * than the camera picture). gs_draw_sprite maps ortho-space [0,base] to
+     * the viewport, so a scaled/translated ortho that sends [0,base] to the
+     * centred letterbox rect [x0,x0+w0]×[y0,y0+h0] is all that's needed —
+     * same top-left orientation as the default, just scaled. The ArkUI
+     * overlay reproduces this exact transform so the selection box always
+     * tracks the pixels. */
+    struct obs_video_info ovi;
+    if (obs_get_video_info(&ovi) && ovi.base_width > 0 && ovi.base_height > 0 && cx > 0 && cy > 0) {
+        const float bw = (float)ovi.base_width;
+        const float bh = (float)ovi.base_height;
+        const float s = fminf((float)cx / bw, (float)cy / bh);
+        const float w0 = bw * s;
+        const float h0 = bh * s;
+        const float x0 = ((float)cx - w0) * 0.5f;
+        const float y0 = ((float)cy - h0) * 0.5f;
+        const float inv = 1.0f / s;
+        gs_ortho(-x0 * inv, ((float)cx - x0) * inv, -y0 * inv, ((float)cy - y0) * inv, -100.0f, 100.0f);
+    }
 
-    (void)param;
+    SurfaceRecord *rec = static_cast<SurfaceRecord *>(param);
+    if (rec != nullptr && rec->isStudio && rec->studioCanvas != nullptr) {
+        obs_render_canvas_texture(static_cast<obs_canvas_t *>(rec->studioCanvas));
+    } else {
+        obs_render_main_texture();
+    }
+
     (void)cx;
     (void)cy;
 }
@@ -120,14 +161,14 @@ bool CreateObsDisplay(SurfaceRecord *rec)
         OH_LOG_ERROR(LOG_APP, "obs_display_create failed for XComponent %{public}s", rec->id.c_str());
         return false;
     }
-    obs_display_add_draw_callback(rec->obsDisplay, ObsDisplayDrawCallback, nullptr);
+    obs_display_add_draw_callback(rec->obsDisplay, ObsDisplayDrawCallback, rec);
     return true;
 }
 
 void DestroyObsDisplay(SurfaceRecord *rec)
 {
     if (rec->obsDisplay != nullptr) {
-        obs_display_remove_draw_callback(rec->obsDisplay, ObsDisplayDrawCallback, nullptr);
+        obs_display_remove_draw_callback(rec->obsDisplay, ObsDisplayDrawCallback, rec);
         obs_display_destroy(rec->obsDisplay);
         rec->obsDisplay = nullptr;
     }
@@ -255,7 +296,7 @@ void OnSurfaceChanged(OH_NativeXComponent *component, void *window)
     OH_LOG_INFO(LOG_APP, "XComponent surface changed: id=%{public}s -> %{public}llu x %{public}llu",
                 rec->id.c_str(), static_cast<unsigned long long>(rec->width),
                 static_cast<unsigned long long>(rec->height));
-    if (rec->isPreview) {
+    if (rec->isPreview || rec->isStudio) {
         // Recreate the graphics surface at the new size. Under HAVE_LIBOBS
         // libobs's backend handles resize via obs_display; recreating the
         // display is always correct, just not the cheapest path.
@@ -285,6 +326,18 @@ void OnSurfaceDestroyed(OH_NativeXComponent *component, void * /*window*/)
 #endif
         rec->isPreview = false;
         g_preview = nullptr;
+    }
+    if (rec->isStudio) {
+#ifdef HAVE_LIBOBS
+        DestroyObsDisplay(rec);
+#else
+        DestroyShellEglSurface(rec);
+#endif
+        rec->isStudio = false;
+        rec->studioCanvas = nullptr;
+        if (g_studio == rec) {
+            g_studio = nullptr;
+        }
     }
     if (rec->window != nullptr)
         OH_NativeWindow_NativeObjectUnreference(rec->window);
@@ -336,16 +389,33 @@ void RegisterXComponent(OH_NativeXComponent *component)
     }
 }
 
+/* Pick the record for an XComponent id. Studio-mode toggles destroy and
+ * recreate the canvas, and every recreation appends a NEW record under the
+ * same id (the napi module Init runs again per component instance). The old
+ * records survive in g_records with window == nullptr — matching one of
+ * those is what left the preview permanently black after a studio
+ * round-trip (user report 10-13 #6). Prefer the LAST record with a live
+ * surface; fall back to the last id match so the "not created yet" error
+ * still names the right component. */
+SurfaceRecord *FindLiveByIdLocked(const std::string &xcomponentId)
+{
+    SurfaceRecord *lastMatch = nullptr;
+    SurfaceRecord *lastLive = nullptr;
+    for (auto &candidate : g_records) {
+        if (candidate->id == xcomponentId) {
+            lastMatch = candidate.get();
+            if (candidate->window != nullptr) {
+                lastLive = candidate.get();
+            }
+        }
+    }
+    return lastLive != nullptr ? lastLive : lastMatch;
+}
+
 bool AttachPreview(const std::string &xcomponentId)
 {
     std::lock_guard<std::mutex> lock(g_mutex);
-    SurfaceRecord *rec = nullptr;
-    for (auto &candidate : g_records) {
-        if (candidate->id == xcomponentId) {
-            rec = candidate.get();
-            break;
-        }
-    }
+    SurfaceRecord *rec = FindLiveByIdLocked(xcomponentId);
     if (rec == nullptr) {
         OH_LOG_ERROR(LOG_APP, "AttachPreview: unknown XComponent id '%{public}s'",
                      xcomponentId.c_str());
@@ -406,9 +476,78 @@ bool PreviewAttached()
     return g_preview != nullptr;
 }
 
+bool AttachStudioPreview(const std::string &xcomponentId, void *canvas)
+{
+    std::lock_guard<std::mutex> lock(g_mutex);
+    SurfaceRecord *rec = FindLiveByIdLocked(xcomponentId);
+    if (rec == nullptr) {
+        OH_LOG_ERROR(LOG_APP, "AttachStudioPreview: unknown XComponent id '%{public}s'", xcomponentId.c_str());
+        return false;
+    }
+    if (rec->window == nullptr) {
+        OH_LOG_ERROR(LOG_APP, "AttachStudioPreview: surface for '%{public}s' not created yet", xcomponentId.c_str());
+        return false;
+    }
+    if (g_studio == rec) {
+        rec->studioCanvas = canvas; // re-point at a (new) canvas, keep display
+        return true;
+    }
+    if (g_studio != nullptr) {
+#ifdef HAVE_LIBOBS
+        DestroyObsDisplay(g_studio);
+#else
+        DestroyShellEglSurface(g_studio);
+#endif
+        g_studio->isStudio = false;
+        g_studio->studioCanvas = nullptr;
+        g_studio = nullptr;
+    }
+
+    rec->studioCanvas = canvas;
+    bool ok;
+#ifdef HAVE_LIBOBS
+    ok = CreateObsDisplay(rec);
+#else
+    ok = CreateShellEglSurface(rec);
+#endif
+    if (ok) {
+        rec->isStudio = true;
+        g_studio = rec;
+        OH_LOG_INFO(LOG_APP, "studio preview surface attached: %{public}s", xcomponentId.c_str());
+    }
+    return ok;
+}
+
+void DetachStudioPreview()
+{
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_studio == nullptr) {
+        return;
+    }
+#ifdef HAVE_LIBOBS
+    DestroyObsDisplay(g_studio);
+#else
+    DestroyShellEglSurface(g_studio);
+#endif
+    g_studio->isStudio = false;
+    g_studio->studioCanvas = nullptr;
+    g_studio = nullptr;
+    OH_LOG_INFO(LOG_APP, "studio preview surface detached");
+}
+
 void ResetAll()
 {
     std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_studio != nullptr) {
+#ifdef HAVE_LIBOBS
+        DestroyObsDisplay(g_studio);
+#else
+        DestroyShellEglSurface(g_studio);
+#endif
+        g_studio->isStudio = false;
+        g_studio->studioCanvas = nullptr;
+        g_studio = nullptr;
+    }
     if (g_preview != nullptr) {
 #ifdef HAVE_LIBOBS
         DestroyObsDisplay(g_preview);

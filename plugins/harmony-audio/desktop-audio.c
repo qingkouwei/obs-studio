@@ -59,11 +59,31 @@ struct harmony_desktop_audio {
 	pthread_mutex_t mutex;
 	enum loopback_state state;
 	bool pending_stop;
+	/* Sticky last error (4 = not authorized, 5 = failed, 0 = none): the
+	 * deferred teardown in video_tick resets state to IDLE one frame
+	 * after a denial, which would erase the 被拒 chip before the mixer
+	 * ever polls it. Cleared by the next start() (a retry). */
+	long long error_state;
 
 	uint32_t mode;
 	uint32_t sample_rate;
 	uint32_t channels;
 };
+
+/* Mirror the loopback state into the source's private settings so the ArkTS
+ * mixer can show 授权中 / 被拒 / 失败 instead of a bare active/Idle — the
+ * bridge reads harmony_capture_state on its 200 ms poll (codes match the
+ * bridge's CaptureState enum: 1 Idle, 2 Requesting, 3 Running, 4
+ * NotAuthorized, 5 Failed). obs_data is internally mutex-guarded, so
+ * publishing from the OHAudio callback thread is safe. */
+static void desktop_audio_publish_code(struct harmony_desktop_audio *da, long long code)
+{
+	obs_data_t *ps = obs_source_get_private_settings(da->source);
+	if (ps == NULL)
+		return;
+	obs_data_set_int(ps, "harmony_capture_state", code);
+	obs_data_release(ps);
+}
 
 static const char *desktop_audio_get_name(void *unused)
 {
@@ -180,11 +200,13 @@ static void desktop_audio_on_start_state(OH_AudioCapturer *capturer, void *user_
 	switch (state) {
 	case AUDIOSTREAM_PLAYBACKCAPTURE_START_STATE_SUCCESS:
 		da->state = LOOPBACK_STATE_RUNNING;
+		da->error_state = 0;
 		blog(LOG_INFO, LOG_PREFIX "playback capture authorized and running");
 		break;
 	case AUDIOSTREAM_PLAYBACKCAPTURE_START_STATE_NOT_AUTHORIZED:
 		da->state = LOOPBACK_STATE_UNAUTHORIZED;
 		da->pending_stop = true;
+		da->error_state = 4;
 		blog(LOG_ERROR,
 		     LOG_PREFIX "playback capture NOT AUTHORIZED: the user denied the system privacy dialog; "
 				"stopping the loopback source");
@@ -193,11 +215,16 @@ static void desktop_audio_on_start_state(OH_AudioCapturer *capturer, void *user_
 	default:
 		da->state = LOOPBACK_STATE_FAILED;
 		da->pending_stop = true;
+		da->error_state = 5;
 		blog(LOG_ERROR, LOG_PREFIX "playback capture start failed (state %d)", (int)state);
 		break;
 	}
 
+	const long long publish = da->error_state != 0 ? da->error_state : (da->state == LOOPBACK_STATE_RUNNING ? 3 : 1);
+
 	pthread_mutex_unlock(&da->mutex);
+
+	desktop_audio_publish_code(da, publish);
 
 	UNUSED_PARAMETER(capturer);
 }
@@ -216,6 +243,12 @@ static void desktop_audio_stop(struct harmony_desktop_audio *da)
 	da->capturer = NULL;
 	da->state = LOOPBACK_STATE_IDLE;
 	da->pending_stop = false;
+	/* Keep the last denial/failure visible: after an unauthorized start
+	 * the video_tick teardown lands here one frame later, and a plain
+	 * Idle publish would erase the 被拒 chip before the mixer polls it.
+	 * Cleared by the next start(). Published under the mutex so it can't
+	 * race a concurrent start() bumping the state to Requesting. */
+	desktop_audio_publish_code(da, da->error_state != 0 ? da->error_state : 1);
 
 	pthread_mutex_unlock(&da->mutex);
 
@@ -289,7 +322,9 @@ static bool desktop_audio_start(struct harmony_desktop_audio *da)
 	/* Async start: AUDIOSTREAM_SUCCESS only means the request was
 	 * submitted; the authoritative result arrives in
 	 * desktop_audio_on_start_state. Do NOT call OH_AudioCapturer_Start
-	 * here - playback capture forbids it. */
+	 * here - playback capture forbids it. A fresh attempt clears any
+	 * sticky denial so the mixer shows 授权中 again, not the last 被拒. */
+	da->error_state = 0;
 	da->state = LOOPBACK_STATE_REQUESTING;
 	result = OH_AudioCapturer_RequestPlaybackCaptureStart(capturer, desktop_audio_on_start_state, da);
 	if (result != AUDIOSTREAM_SUCCESS) {
@@ -298,6 +333,7 @@ static bool desktop_audio_start(struct harmony_desktop_audio *da)
 		da->capturer = NULL;
 		desktop_audio_destroy_resampler(da);
 		da->state = LOOPBACK_STATE_FAILED;
+		da->error_state = 5;
 		goto fail;
 	}
 
@@ -307,6 +343,7 @@ static bool desktop_audio_start(struct harmony_desktop_audio *da)
 
 fail:
 	pthread_mutex_unlock(&da->mutex);
+	desktop_audio_publish_code(da, success ? 2 : 5);
 	return success;
 }
 

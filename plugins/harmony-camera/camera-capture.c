@@ -73,6 +73,10 @@ struct harmony_camera_capture {
 
 	/* Settings. */
 	char device_id[64];
+	/* Preferred physical position when device_id is empty: "Back", "Front"
+	 * or "" (any — first enumerated). The ArkTS settings panel writes this
+	 * so "switch camera" works without exposing raw device ids. */
+	char camera_position[16];
 	char resolution[32];
 	int frame_rate;
 	int32_t camera_format; /* Camera_Format */
@@ -157,12 +161,12 @@ static bool camera_capture_ensure_manager(struct harmony_camera_capture *cap)
 	return true;
 }
 
-/* Finds a camera device by its ID string, falling back to the first camera
- * when device_id is empty or unknown. *out is filled with a copy whose
- * cameraId points into id_buf, so the caller stays valid after the device
- * list is released. */
-static bool camera_capture_find_device(Camera_Manager *manager, const char *device_id, Camera_Device *out,
-				       char *id_buf, size_t id_buf_size)
+/* Finds a camera device by its ID string. When device_id is empty, honours an
+ * optional position preference ("Front"/"Back") before falling back to the
+ * first camera. *out is filled with a copy whose cameraId points into id_buf,
+ * so the caller stays valid after the device list is released. */
+static bool camera_capture_find_device(Camera_Manager *manager, const char *device_id, const char *want_position,
+				       Camera_Device *out, char *id_buf, size_t id_buf_size)
 {
 	Camera_Device *cameras = NULL;
 	uint32_t size = 0;
@@ -173,7 +177,13 @@ static bool camera_capture_find_device(Camera_Manager *manager, const char *devi
 		return false;
 	}
 
+	const Camera_Position prefer =
+		(want_position != NULL && strcmp(want_position, "Front") == 0) ? CAMERA_POSITION_FRONT :
+		(want_position != NULL && strcmp(want_position, "Back") == 0) ? CAMERA_POSITION_BACK :
+									      CAMERA_POSITION_UNSPECIFIED;
+
 	const Camera_Device *found = NULL;
+	const Camera_Device *position_match = NULL;
 	/* "@remote" is a sentinel, not an id: the Service Collaboration
 	 * cross-device camera (the phone camera mounted into this device's
 	 * Camera Kit under the same account) shows up as a regular entry
@@ -195,6 +205,11 @@ static bool camera_capture_find_device(Camera_Manager *manager, const char *devi
 			remote = camera;
 			break;
 		}
+		/* No explicit id: remember the first camera whose physical
+		 * position matches the panel preference, if any. */
+		if (prefer != CAMERA_POSITION_UNSPECIFIED && position_match == NULL &&
+		    camera->cameraPosition == prefer)
+			position_match = camera;
 		if (found == NULL)
 			found = camera;
 	}
@@ -203,6 +218,9 @@ static bool camera_capture_find_device(Camera_Manager *manager, const char *devi
 		found = remote;
 	} else if (want_remote) {
 		blog(LOG_WARNING, LOG_PREFIX "no CAMERA_CONNECTION_REMOTE device present, falling back to first camera");
+	} else if (device_id == NULL || device_id[0] == '\0') {
+		if (position_match != NULL)
+			found = position_match;
 	}
 
 	if (found == NULL) {
@@ -695,7 +713,8 @@ static bool camera_capture_start(struct harmony_camera_capture *cap)
 
 	Camera_Device device = {0};
 	char device_id_buf[64];
-	if (!camera_capture_find_device(cap->manager, cap->device_id, &device, device_id_buf, sizeof(device_id_buf)))
+	if (!camera_capture_find_device(cap->manager, cap->device_id, cap->camera_position, &device, device_id_buf,
+					sizeof(device_id_buf)))
 		goto fail;
 
 	uint32_t want_width = 0;
@@ -875,6 +894,8 @@ static void camera_capture_stop(struct harmony_camera_capture *cap)
 static void camera_capture_read_settings(struct harmony_camera_capture *cap, obs_data_t *settings)
 {
 	snprintf(cap->device_id, sizeof(cap->device_id), "%s", obs_data_get_string(settings, "device_id"));
+	snprintf(cap->camera_position, sizeof(cap->camera_position), "%s",
+		 obs_data_get_string(settings, "camera_position"));
 	snprintf(cap->resolution, sizeof(cap->resolution), "%s", obs_data_get_string(settings, "resolution"));
 	cap->frame_rate = (int)obs_data_get_int(settings, "frame_rate");
 	cap->camera_format = (int32_t)obs_data_get_int(settings, "video_format");
@@ -921,15 +942,21 @@ static void camera_capture_update(void *data, obs_data_t *settings)
 	const int32_t old_format = cap->camera_format;
 	const int old_frame_rate = cap->frame_rate;
 	const bool was_running = cap->running;
+	const char *old_position = cap->camera_position;
 
 	const char *new_device_id = obs_data_get_string(settings, "device_id");
 	const char *new_resolution = obs_data_get_string(settings, "resolution");
 	const int32_t new_format = (int32_t)obs_data_get_int(settings, "video_format");
 	const int new_frame_rate = (int)obs_data_get_int(settings, "frame_rate");
+	const char *new_position = obs_data_get_string(settings, "camera_position");
 
-	/* Device, resolution or format changes require a new session; a frame
-	 * rate change can be applied to the live video output. */
+	/* Device, position preference, resolution or format changes require a
+	 * new session; a frame rate change can be applied to the live video
+	 * output. The position switch only takes effect when no explicit
+	 * device_id is pinned (the panel clears device_id when it writes a
+	 * position, so "switch camera" works without raw ids). */
 	const bool needs_restart = (strcmp(new_device_id, old_device_id) != 0) ||
+				   (strcmp(new_position, old_position) != 0) ||
 				   (strcmp(new_resolution, old_resolution) != 0) || (new_format != old_format);
 	const bool rate_changed = (new_frame_rate != old_frame_rate);
 
@@ -966,6 +993,9 @@ static void camera_capture_get_defaults(obs_data_t *settings)
 	/* An empty device_id means "first supported camera", which keeps the
 	 * default working across devices whose camera IDs differ. */
 	obs_data_set_default_string(settings, "device_id", "");
+	/* Empty position = no preference (first camera wins). The ArkTS
+	 * panel writes "Front"/"Back" for the camera-switch control. */
+	obs_data_set_default_string(settings, "camera_position", "");
 	obs_data_set_default_string(settings, "resolution", "1920x1080");
 	obs_data_set_default_int(settings, "frame_rate", 30);
 	obs_data_set_default_int(settings, "video_format", CAMERA_FORMAT_YUV_420_SP);

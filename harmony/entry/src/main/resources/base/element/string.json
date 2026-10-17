@@ -2,39 +2,71 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "面向 HarmonyOS PC 的 OBS Studio 前端"
+      "value": "轻录直录播软件 · HarmonyOS 前端模块"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "OBS Studio 主窗口：场景混音、直播推流与录制"
+      "value": "轻录主窗口：场景合成、直播推流与录制"
+    },
+    {
+      "name": "src_web",
+      "value": "浏览器"
+    },
+    {
+      "name": "web_source_title",
+      "value": "添加浏览器源"
+    },
+    {
+      "name": "web_source_hint",
+      "value": "网页地址 https://…"
+    },
+    {
+      "name": "web_source_w",
+      "value": "宽"
+    },
+    {
+      "name": "web_source_h",
+      "value": "高"
+    },
+    {
+      "name": "web_source_add",
+      "value": "添加"
+    },
+    {
+      "name": "web_source_cancel",
+      "value": "取消"
     },
     {
       "name": "EntryAbility_label",
-      "value": "OBS Studio"
+      "value": "轻录直录播"
     },
     {
       "name": "reason_microphone",
-      "value": "OBS 将麦克风采集为直播/录制的音频来源。"
+      "value": "轻录将麦克风采集为直播/录制的音频来源。"
     },
     {
       "name": "reason_camera",
-      "value": "OBS 将摄像头采集为直播/录制的视频来源。"
+      "value": "轻录将摄像头采集为直播/录制的视频来源。"
     },
     {
       "name": "reason_background",
-      "value": "在 OBS 窗口最小化或退至后台时，保持正在进行的直播不中断。"
+      "value": "在轻录窗口最小化或退至后台时，保持正在进行的录制或直播不中断。"
     },
     {
       "name": "reason_screen_capture",
-      "value": "OBS 将屏幕或窗口采集为直播/录制的视频来源。"
+      "value": "轻录将屏幕或窗口采集为直播/录制的视频来源。"
     },
     {
       "name": "reason_screen_recording",
-      "value": "OBS 将屏幕内容录制进你的直播或录像文件。"
+      "value": "轻录将屏幕内容录制进你的直播画面或本地录像文件。"
     },
     {
       "name": "reason_input_monitoring",
-      "value": "OBS 监测音频输入以显示说话活跃指示。"
+      "value": "用于在应用未获焦时响应全局快捷键（Ctrl+Shift+R 开始/停止录制，Ctrl+Shift+S 开始/停止推流）；轻录不会记录你的键盘输入内容。"
+    },
+    {
+      "name": "reason_distributed",
+      "value": "轻录使用跨设备协同通道连接制作端，实现手机导播遥控与无线机位。"
     },
     {
       "name": "app_subtitle",
@@ -197,6 +229,66 @@
       "value": "录制启动失败——检查输出路径与日志。"
     },
     {
+      "name": "settings_export_album",
+      "value": "导出上次录制到相册"
+    },
+    {
+      "name": "works_title",
+      "value": "作品"
+    },
+    {
+      "name": "works_close",
+      "value": "关闭"
+    },
+    {
+      "name": "works_back",
+      "value": "返回"
+    },
+    {
+      "name": "works_empty",
+      "value": "暂无录制作品"
+    },
+    {
+      "name": "works_play",
+      "value": "预览"
+    },
+    {
+      "name": "works_export",
+      "value": "导出"
+    },
+    {
+      "name": "works_delete",
+      "value": "删除"
+    },
+    {
+      "name": "stream_history",
+      "value": "历史"
+    },
+    {
+      "name": "stream_history_empty",
+      "value": "暂无历史推流地址"
+    },
+    {
+      "name": "stream_key_hint",
+      "value": "串流密钥（点击眼睛查看）"
+    },
+    {
+      "name": "mixer_empty",
+      "value": "场景里还没有音频源——添加麦克风或桌面音频后即可在此调节"
+    },
+    {
+      "name": "notice_export_none",
+      "value": "没有可导出的录制文件。"
+    },
+    {
+      "name": "notice_export_done",
+      "value": "录制已导出到相册。"
+    },
+    {
+      "name": "notice_export_fail",
+      "value": "导出相册失败——见日志。"
+    },
+    {
       "name": "st_unsupported",
       "value": "本机不支持"
     },
@@ -357,8 +449,196 @@
       "value": "同步偏移"
     },
     {
-      "name": "src_remote_camera",
-      "value": "远程相机"
+      "name": "src_wireless_cam",
+      "value": "无线机位"
+    },
+    {
+      "name": "notice_settings_applied",
+      "value": "设置已应用"
+    },
+    {
+      "name": "notice_settings_failed",
+      "value": "设置应用失败"
+    },
+    {
+      "name": "src_media",
+      "value": "媒体"
+    },
+    {
+      "name": "notice_dup_fail",
+      "value": "复制源失败"
+    },
+    {
+      "name": "studio_toggle",
+      "value": "工作室模式"
+    },
+    {
+      "name": "studio_preview_label",
+      "value": "预览"
+    },
+    {
+      "name": "studio_program_label",
+      "value": "节目"
+    },
+    {
+      "name": "studio_take",
+      "value": "切到"
+    },
+    {
+      "name": "studio_cut",
+      "value": "切断"
+    },
+    {
+      "name": "transition_title",
+      "value": "转场动画"
+    },
+    {
+      "name": "transition_duration",
+      "value": "时长"
+    },
+    {
+      "name": "transition_unavailable",
+      "value": "无可用转场（插件未加载）"
+    },
+    {
+      "name": "notice_transition_fail",
+      "value": "切换转场类型失败"
+    },
+    {
+      "name": "src_slideshow",
+      "value": "幻灯片"
+    },
+    {
+      "name": "src_color",
+      "value": "色块"
+    },
+    {
+      "name": "confirm_title",
+      "value": "确认操作"
+    },
+    {
+      "name": "confirm_ok",
+      "value": "确定"
+    },
+    {
+      "name": "confirm_cancel",
+      "value": "取消"
+    },
+    {
+      "name": "confirm_start_stream",
+      "value": "确定开始直播吗？"
+    },
+    {
+      "name": "confirm_stop_stream",
+      "value": "确定停止直播吗？"
+    },
+    {
+      "name": "confirm_start_record",
+      "value": "确定开始录制吗？"
+    },
+    {
+      "name": "confirm_stop_record",
+      "value": "确定停止录制吗？"
+    },
+    {
+      "name": "set_general",
+      "value": "常规"
+    },
+    {
+      "name": "set_video",
+      "value": "视频"
+    },
+    {
+      "name": "set_record",
+      "value": "录制"
+    },
+    {
+      "name": "set_stream",
+      "value": "直播"
+    },
+    {
+      "name": "set_snap_enable",
+      "value": "启用源对齐吸附"
+    },
+    {
+      "name": "set_snap_threshold",
+      "value": "吸附灵敏度"
+    },
+    {
+      "name": "set_snap_edges",
+      "value": "吸附到屏幕边缘"
+    },
+    {
+      "name": "set_confirm_group",
+      "value": "输出确认"
+    },
+    {
+      "name": "set_confirm_start_record",
+      "value": "开始录制时弹窗确认"
+    },
+    {
+      "name": "set_confirm_stop_record",
+      "value": "停止录制时弹窗确认"
+    },
+    {
+      "name": "set_confirm_start_stream",
+      "value": "开始直播时弹窗确认"
+    },
+    {
+      "name": "set_confirm_stop_stream",
+      "value": "停止直播时弹窗确认"
+    },
+    {
+      "name": "set_auto_record",
+      "value": "直播时自动开始录制"
+    },
+    {
+      "name": "set_snap_group",
+      "value": "源对齐"
+    },
+    {
+      "name": "set_auto_stop_record",
+      "value": "停止直播后自动停止录制"
+    },
+    {
+      "name": "set_guides_group",
+      "value": "预览参考线"
+    },
+    {
+      "name": "set_guide_safe",
+      "value": "安全区（动作 90% / 标题 80%）"
+    },
+    {
+      "name": "set_guide_center",
+      "value": "中心十字"
+    },
+    {
+      "name": "set_guide_scale",
+      "value": "比例参考框（4:3 / 1:1 / 4:5）"
+    },
+    {
+      "name": "set_keys",
+      "value": "快捷键"
+    },
+    {
+      "name": "key_scene_n",
+      "value": "数字 1-9：切换场景"
+    },
+    {
+      "name": "key_ctrl_r",
+      "value": "Ctrl+R：开始/停止录制"
+    },
+    {
+      "name": "key_ctrl_f",
+      "value": "Ctrl+F：开始/停止直播"
+    },
+    {
+      "name": "key_arrows",
+      "value": "方向键：微调选中源（Shift=10px）"
+    },
+    {
+      "name": "key_del",
+      "value": "Delete：删除选中源"
     }
   ]
 }

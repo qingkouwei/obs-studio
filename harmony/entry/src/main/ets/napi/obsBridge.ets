@@ -1,6 +1,7 @@
 import obsBridgeNative from 'libobs_bridge.so';
 import {
   NativeAudioTrack,
+  NativeCameraSenderStatus,
   NativeFilterEntry,
   NativeOutputLevel,
   NativeSceneEntry,
@@ -33,8 +34,7 @@ export class SystemAudioCapability {
 }
 
 /** Snapshot returned by getStats() when the native call fails. */
-export class StreamStatsSnapshot {
-  streaming: boolean = false;
+export class StreamStatsSnapshot {  streaming: boolean = false;
   recording: boolean = false;
   bitrateKbps: number = 0;
   droppedFrames: number = 0;
@@ -44,6 +44,14 @@ export class StreamStatsSnapshot {
   static empty(): StreamStatsSnapshot {
     return new StreamStatsSnapshot();
   }
+}
+
+/** Axis-aligned bounding box of a scene item in canvas px (top-left origin). */
+export class SourceBounds {
+  x: number = 0;
+  y: number = 0;
+  w: number = 0;
+  h: number = 0;
 }
 
 export class ObsBridge {
@@ -83,6 +91,43 @@ export class ObsBridge {
     }
   }
 
+  /* ---- Studio mode ---- */
+
+  static setPreviewScene(id: string): boolean {
+    try {
+      return obsBridgeNative.nativeSetPreviewScene(id);
+    } catch (err) {
+      Logger.error(`nativeSetPreviewScene(${id}) failed`, Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  static getPreviewSceneId(): string {
+    try {
+      return obsBridgeNative.nativeGetPreviewSceneId();
+    } catch (err) {
+      Logger.error('nativeGetPreviewSceneId failed', Logger.asError(err as Object));
+      return '';
+    }
+  }
+
+  static attachStudioPreviewSurface(xcomponentId: string): boolean {
+    try {
+      return obsBridgeNative.nativeAttachStudioPreviewSurface(xcomponentId);
+    } catch (err) {
+      Logger.error('nativeAttachStudioPreviewSurface failed', Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  static detachStudioPreviewSurface(): void {
+    try {
+      obsBridgeNative.nativeDetachStudioPreviewSurface();
+    } catch (err) {
+      Logger.error('nativeDetachStudioPreviewSurface failed', Logger.asError(err as Object));
+    }
+  }
+
   static getScenes(): NativeSceneEntry[] {
     try {
       return obsBridgeNative.nativeGetScenes();
@@ -110,6 +155,15 @@ export class ObsBridge {
     }
   }
 
+  static renameScene(id: string, name: string): boolean {
+    try {
+      return obsBridgeNative.nativeRenameScene(id, name);
+    } catch (err) {
+      Logger.error(`nativeRenameScene(${id}) failed`, Logger.asError(err as Object));
+      return false;
+    }
+  }
+
   static getSources(sceneId: string): NativeSourceEntry[] {
     try {
       return obsBridgeNative.nativeGetSources(sceneId);
@@ -125,6 +179,119 @@ export class ObsBridge {
     } catch (err) {
       Logger.error(`nativeAddSource(${typeId}) failed`, Logger.asError(err as Object));
       return '';
+    }
+  }
+
+  /**
+   * harmony-web (ArkWeb browser source) frame feed — push one BGRA snapshot
+   * into an async video source. itemId is the scene-item id the source was
+   * added under (SourceItemModel.id); pass timestampNs=0 to let the bridge
+   * stamp its own CLOCK_MONOTONIC (single clock domain, see WebFeed.ets).
+   * Returns false (never throws) when the source is gone or the buffer is
+   * short — the pump treats false as "retire this entry".
+   */
+  static webSourceFeed(itemId: string, width: number, height: number, rgba: ArrayBuffer,
+    timestampNs: number): boolean {
+    try {
+      return obsBridgeNative.nativeWebSourceFeed(itemId, width, height, rgba, timestampNs);
+    } catch (err) {
+      Logger.error(`nativeWebSourceFeed(${itemId}) failed`, Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  /** JSON of the source's stored settings ('' when gone) — lets WebFeed
+   * rebuild its registry from libobs state after a scene reload. */
+  static getSourceSettings(itemId: string): string {
+    try {
+      return obsBridgeNative.nativeGetSourceSettings(itemId);
+    } catch (err) {
+      Logger.error(`nativeGetSourceSettings(${itemId}) failed`, Logger.asError(err as Object));
+      return '';
+    }
+  }
+
+  /** Merge a settings patch into a source's stored settings and push it
+   * through the plugin's update() (per-source settings sheets write back
+   * here). True on success; false when the item is gone or the JSON is bad. */
+  static setSourceSettings(itemId: string, settingsJson: string): boolean {
+    try {
+      return obsBridgeNative.nativeSetSourceSettings(itemId, settingsJson);
+    } catch (err) {
+      Logger.error(`nativeSetSourceSettings(${itemId}) failed`, Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  /* ---- Media transport ---- */
+
+  static mediaControl(id: string, action: string): boolean {
+    try {
+      return obsBridgeNative.nativeMediaControl(id, action);
+    } catch (err) {
+      Logger.error(`nativeMediaControl(${id}, ${action}) failed`, Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  /** JSON '{"time":ms,"duration":ms,"state":"..."}' ('' when gone). */
+  static getMediaState(id: string): string {
+    try {
+      return obsBridgeNative.nativeGetMediaState(id);
+    } catch (err) {
+      Logger.error(`nativeGetMediaState(${id}) failed`, Logger.asError(err as Object));
+      return '';
+    }
+  }
+
+  static mediaSeek(id: string, ms: number): boolean {
+    try {
+      return obsBridgeNative.nativeMediaSeek(id, ms);
+    } catch (err) {
+      Logger.error(`nativeMediaSeek(${id}) failed`, Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  /* ---- Advanced audio props ---- */
+
+  /** JSON '{"sync":ms,"monitor":0|1|2}' ('' when gone). */
+  static getSourceAudioProps(id: string): string {
+    try {
+      return obsBridgeNative.nativeGetSourceAudioProps(id);
+    } catch (err) {
+      Logger.error(`nativeGetSourceAudioProps(${id}) failed`, Logger.asError(err as Object));
+      return '';
+    }
+  }
+
+  static setSourceAudioProps(id: string, syncOffsetMs: number, monitoringType: number): boolean {
+    try {
+      return obsBridgeNative.nativeSetSourceAudioProps(id, syncOffsetMs, monitoringType);
+    } catch (err) {
+      Logger.error(`nativeSetSourceAudioProps(${id}) failed`, Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  /* ---- Generic property schema ---- */
+
+  /** JSON array of property descriptors ('[]' when unavailable). */
+  static getPropertySchema(itemId: string, filterName: string): string {
+    try {
+      return obsBridgeNative.nativeGetPropertySchema(itemId, filterName);
+    } catch (err) {
+      Logger.error(`nativeGetPropertySchema(${itemId}) failed`, Logger.asError(err as Object));
+      return '[]';
+    }
+  }
+
+  static setFilterSettings(itemId: string, filterName: string, settingsJson: string): boolean {
+    try {
+      return obsBridgeNative.nativeSetFilterSettings(itemId, filterName, settingsJson);
+    } catch (err) {
+      Logger.error(`nativeSetFilterSettings(${itemId}) failed`, Logger.asError(err as Object));
+      return false;
     }
   }
 
@@ -146,11 +313,187 @@ export class ObsBridge {
     }
   }
 
+  /** Canvas-px bounding box of a scene item; null when unavailable. */
+  static getSourceBounds(id: string): SourceBounds | null {
+    try {
+      const raw = obsBridgeNative.nativeGetSourceBounds(id);
+      if (raw === '' || raw === undefined) {
+        return null;
+      }
+      const parsed = JSON.parse(raw) as SourceBounds;
+      return parsed;
+    } catch (err) {
+      Logger.error('nativeGetSourceBounds failed', Logger.asError(err as Object));
+      return null;
+    }
+  }
+
+  static setSourcePosition(id: string, x: number, y: number): boolean {
+    try {
+      return obsBridgeNative.nativeSetSourcePosition(id, x, y);
+    } catch (err) {
+      Logger.error('nativeSetSourcePosition failed', Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  /** Absolute rendered rect (canvas px) — the corner-handle resize
+   * commits here; clears any bounds mode and derives the scale. */
+  static setSourceRect(id: string, x: number, y: number, w: number, h: number): boolean {
+    try {
+      return obsBridgeNative.nativeSetSourceRect(id, x, y, w, h);
+    } catch (err) {
+      Logger.error('nativeSetSourceRect failed', Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  static scaleSourceBy(id: string, factor: number): boolean {
+    try {
+      return obsBridgeNative.nativeScaleSourceBy(id, factor);
+    } catch (err) {
+      Logger.error('nativeScaleSourceBy failed', Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  /** Source context menu (desktop parity): rotation in degrees + axis
+   * mirrors (absolute values, the ArkTS layer tracks the current state). */
+  static setSourceTransform(id: string, rotDeg: number, flipX: boolean, flipY: boolean): boolean {
+    try {
+      return obsBridgeNative.nativeSetSourceTransform(id, rotDeg, flipX, flipY);
+    } catch (err) {
+      Logger.error(`nativeSetSourceTransform(${id}) failed`, Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  /** Bounds preset: 'fit' (scale inner, centred) | 'stretch' | 'none'. */
+  static setSourceBoundsFit(id: string, mode: string): boolean {
+    try {
+      return obsBridgeNative.nativeSetSourceBoundsFit(id, mode);
+    } catch (err) {
+      Logger.error(`nativeSetSourceBoundsFit(${id}) failed`, Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  /** Absolute size in canvas px (w/h <= 0 keeps that axis). */
+  static setSourceSize(id: string, w: number, h: number): boolean {
+    try {
+      return obsBridgeNative.nativeSetSourceSize(id, w, h);
+    } catch (err) {
+      Logger.error(`nativeSetSourceSize(${id}) failed`, Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  static setSourceLocked(id: string, locked: boolean): boolean {
+    try {
+      return obsBridgeNative.nativeSetSourceLocked(id, locked);
+    } catch (err) {
+      Logger.error(`nativeSetSourceLocked(${id}) failed`, Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  /** dir: 'up' | 'down' | 'top' | 'bottom'. */
+  static setSourceOrder(id: string, dir: string): boolean {
+    try {
+      return obsBridgeNative.nativeSetSourceOrder(id, dir);
+    } catch (err) {
+      Logger.error(`nativeSetSourceOrder(${id}, ${dir}) failed`, Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  /** Current transform as JSON '{"rot":..,"flipX":..,"flipY":..}' ('' when
+   * the item is gone) — the menu's toggles read it before computing the
+   * next absolute state. */
+  static getSourceTransform(id: string): string {
+    try {
+      return obsBridgeNative.nativeGetSourceTransform(id);
+    } catch (err) {
+      Logger.error(`nativeGetSourceTransform(${id}) failed`, Logger.asError(err as Object));
+      return '';
+    }
+  }
+
+  /** Reference-copy a scene item; returns the new item id or ''. */
+  static duplicateSource(id: string): string {
+    try {
+      return obsBridgeNative.nativeDuplicateSource(id);
+    } catch (err) {
+      Logger.error(`nativeDuplicateSource(${id}) failed`, Logger.asError(err as Object));
+      return '';
+    }
+  }
+
+  static renameSource(id: string, name: string): boolean {
+    try {
+      return obsBridgeNative.nativeRenameSource(id, name);
+    } catch (err) {
+      Logger.error(`nativeRenameSource(${id}) failed`, Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  /** W3-C1 wireless-camera sender (phone role). Returns false + a message
+   * instead of throwing so the role page can surface the reason. */
+  static startCameraSender(host: string, port: number, bitrateKbps: number): string | undefined {
+    try {
+      obsBridgeNative.nativeStartCameraSender(host, port, bitrateKbps);
+      return undefined;
+    } catch (err) {
+      const e = Logger.asError(err as Object);
+      Logger.error('nativeStartCameraSender failed', e);
+      return e.message;
+    }
+  }
+
+  static stopCameraSender(): void {
+    try {
+      obsBridgeNative.nativeStopCameraSender();
+    } catch (err) {
+      Logger.error('nativeStopCameraSender failed', Logger.asError(err as Object));
+    }
+  }
+
+  static cameraSenderStatus(): NativeCameraSenderStatus | undefined {
+    try {
+      return obsBridgeNative.nativeCameraSenderStatus();
+    } catch (err) {
+      Logger.error('nativeCameraSenderStatus failed', Logger.asError(err as Object));
+      return undefined;
+    }
+  }
+
   static selectScene(id: string, durationMs: number = 0): boolean {
     try {
       return obsBridgeNative.nativeSelectScene(id, durationMs);
     } catch (err) {
       Logger.error('nativeSelectScene failed', Logger.asError(err as Object));
+      return false;
+    }
+  }
+
+  /** JSON array of registered transition types [{"id","name"}] ('' or '[]'
+   * when the core is unavailable) — the 转场动画 dock populates from this. */
+  static getTransitionTypes(): string {
+    try {
+      return obsBridgeNative.nativeGetTransitionTypes();
+    } catch (err) {
+      Logger.error('nativeGetTransitionTypes failed', Logger.asError(err as Object));
+      return '';
+    }
+  }
+
+  /** Swap the program transition shell to another transition type. */
+  static setTransitionType(id: string): boolean {
+    try {
+      return obsBridgeNative.nativeSetTransitionType(id);
+    } catch (err) {
+      Logger.error(`nativeSetTransitionType(${id}) failed`, Logger.asError(err as Object));
       return false;
     }
   }
@@ -287,6 +630,18 @@ export class ObsBridge {
     Logger.info(`system audio probe: syscap=${capability.syscapReported} ` +
       `native=${capability.nativeProbeOk} => supported=${capability.supported}`);
     return capability;
+  }
+
+  /** Lazy desktop-loopback starter — call when the user adds the desktop
+   * audio source. The boot-time request popped the system privacy dialog on
+   * every cold start (session consent, 10-13); idempotent + fire-and-forget,
+   * the authorization outcome surfaces through the mixer's track poll. */
+  static ensureDesktopAudio(): void {
+    try {
+      obsBridgeNative.nativeEnsureDesktopAudio();
+    } catch (err) {
+      Logger.error('nativeEnsureDesktopAudio failed', Logger.asError(err as Object));
+    }
   }
 
   static startStreaming(configJson: string): boolean {

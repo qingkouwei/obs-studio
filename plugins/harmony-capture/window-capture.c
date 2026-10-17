@@ -38,21 +38,66 @@
 #include <multimedia/player_framework/native_avscreen_capture_base.h>
 #include <multimedia/player_framework/native_avbuffer.h>
 #include <native_buffer/native_buffer.h>
+#include <window_manager/oh_display_manager.h>
 
 #define LOG_PREFIX "[harmony window capture] "
+
+/* Native display resolution via the NDK display manager (window_manager/
+ * oh_display_manager.h, API 12+, libnative_display_manager.so). The capture
+ * canvas declares this size so the service never scales the window: a
+ * window can't exceed the screen, so window->canvas is always identity or
+ * downscale-by-the-window-being-small, never a stretch. Desktop OBS gets
+ * this for free (its frames ARE the window's pixels); declaring the display
+ * size is the closest OHOS equivalent. */
+static void harmony_native_display_size(uint32_t *width, uint32_t *height)
+{
+	int32_t w = 0, h = 0;
+	NativeDisplayManager_ErrorCode rw = OH_NativeDisplayManager_GetDefaultDisplayWidth(&w);
+	NativeDisplayManager_ErrorCode rh = OH_NativeDisplayManager_GetDefaultDisplayHeight(&h);
+
+	if (rw == DISPLAY_MANAGER_OK && rh == DISPLAY_MANAGER_OK && w > 0 && h > 0) {
+		*width = (uint32_t)w;
+		*height = (uint32_t)h;
+	} else {
+		/* Query failed: fall back to the old fixed default. */
+		*width = 1920;
+		*height = 1080;
+	}
+	blog(LOG_INFO, LOG_PREFIX "display query: rw=%d rh=%d -> %dx%d (used %ux%u)", (int)rw, (int)rh, w, h,
+	     *width, *height);
+}
 
 struct harmony_window_capture {
 	obs_source_t *source;
 	OH_AVScreenCapture *capture;
 
 	int32_t mission_id;
-	uint32_t width;
+	uint32_t width;  /* current capture canvas: what the service is
+			  * producing frames at right now. Owned by create()/
+			  * start() (seed) and the content-changed follow; when
+			  * follow_window_size is off it mirrors the pinned
+			  * settings width/height. */
 	uint32_t height;
 	int frame_rate;
 	bool capture_cursor;
 
 	bool running;
 	int32_t selected_type; /* from the picker's user-selection callback */
+
+	/* Desktop-aligned sizing: the capture canvas follows the selected
+	 * window's real rect (from the content-changed callback's OH_Rect), so
+	 * a frame is the window's own pixels — never a stretched fixed 1080p
+	 * and never letterboxed. The callback only records a pending size; the
+	 * resize is applied from get_width on OBS's graphics thread.
+	 * pin_size (settings bool, default false = follow) gates the follow;
+	 * when true, the pinned width/height is the canvas. Named pin_* (not
+	 * follow_*) so a source saved before this key existed reads false and
+	 * keeps the desktop-aligned follow — obs_data_get_bool defaults missing
+	 * keys to false, which is exactly the behaviour we want as the default. */
+	uint32_t pending_w;
+	uint32_t pending_h;
+	bool pending_resize;
+	bool pin_size;
 };
 
 static const char *window_capture_get_name(void *unused)
@@ -229,6 +274,32 @@ static void window_capture_on_user_selected(OH_AVScreenCapture *capture, OH_AVSc
 	UNUSED_PARAMETER(capture);
 }
 
+/* Content-changed callback (API 20): the event-driven equivalent of desktop
+ * OBS's GetClientRect resize poll. `area` is the captured window's real rect
+ * in px. We only STASH it here — this runs on the capture service's callback
+ * thread, and calling ResizeCanvas back into the service from there is an
+ * unverified re-entrancy risk. The actual resize is applied from
+ * window_capture_get_width below, which OBS calls on its own graphics thread
+ * (the desktop pattern: react to the size event on the consumer's thread). */
+static void window_capture_on_content_changed(OH_AVScreenCapture *capture,
+					      OH_AVScreenCaptureContentChangedEvent event, OH_Rect *area,
+					      void *user_data)
+{
+	struct harmony_window_capture *cap = user_data;
+
+	if (event == OH_SCREEN_CAPTURE_CONTENT_VISIBLE && area != NULL && !cap->pin_size) {
+		const uint32_t w = (uint32_t)(area->width > 0 ? area->width : 0);
+		const uint32_t h = (uint32_t)(area->height > 0 ? area->height : 0);
+		if (w && h && (w != cap->width || h != cap->height)) {
+			cap->pending_w = w;
+			cap->pending_h = h;
+			cap->pending_resize = true;
+		}
+	}
+
+	UNUSED_PARAMETER(capture);
+}
+
 static void window_capture_on_state_change(OH_AVScreenCapture *capture, OH_AVScreenCaptureStateCode state_code,
 					   void *user_data)
 {
@@ -337,6 +408,13 @@ static bool window_capture_start(struct harmony_window_capture *cap)
 		return false;
 	}
 
+	/* Content-changed drives the desktop-style "canvas = window size"
+	 * follow. Must be registered before Start (API 20). */
+	err = OH_AVScreenCapture_SetCaptureContentChangedCallback(cap->capture, window_capture_on_content_changed, cap);
+	if (err != AV_SCREEN_CAPTURE_ERR_OK)
+		blog(LOG_WARNING, LOG_PREFIX "SetCaptureContentChangedCallback failed with %d (canvas stays fixed)",
+		     (int)err);
+
 	/* Must be registered before the authorization flow starts (header
 	 * docs, API 20). */
 	err = OH_AVScreenCapture_SetSelectionCallback(cap->capture, window_capture_on_user_selected, cap);
@@ -403,8 +481,21 @@ static int32_t parse_mission_id(const char *window)
 static void window_capture_update_internal(struct harmony_window_capture *cap, obs_data_t *settings, bool restart)
 {
 	cap->mission_id = parse_mission_id(obs_data_get_string(settings, "window"));
-	cap->width = (uint32_t)obs_data_get_int(settings, "width");
-	cap->height = (uint32_t)obs_data_get_int(settings, "height");
+	cap->pin_size = obs_data_get_bool(settings, "pin_size");
+
+	const uint32_t pin_w = (uint32_t)obs_data_get_int(settings, "width");
+	const uint32_t pin_h = (uint32_t)obs_data_get_int(settings, "height");
+	if (cap->pin_size && pin_w > 0 && pin_h > 0) {
+		cap->width = pin_w;
+		cap->height = pin_h;
+	} else {
+		/* follow mode (or an incomplete pin): seed the canvas at the
+		 * native display so the very first frames are never a
+		 * stretched 1080p; the content-changed callback then narrows
+		 * it to the window's real rect. */
+		cap->pin_size = false;
+		harmony_native_display_size(&cap->width, &cap->height);
+	}
 	cap->frame_rate = (int)obs_data_get_int(settings, "frame_rate");
 	cap->capture_cursor = obs_data_get_bool(settings, "capture_cursor");
 
@@ -457,9 +548,39 @@ static void window_capture_destroy(void *data)
 	bfree(cap);
 }
 
+/* Apply a window-rect change the content-changed callback stashed. Runs on
+ * OBS's graphics thread (get_* path) rather than the capture service's event
+ * thread, so we never re-enter the service from its own callback. ResizeCanvas
+ * is a lightweight dimension-set, not the heavy synchronous teardown that made
+ * the audio-start IPC an ANR risk, so one call here is acceptable; it is also
+ * guarded to fire at most once per observed change. */
+static void window_capture_apply_pending_resize(struct harmony_window_capture *cap)
+{
+	if (!cap->pending_resize)
+		return;
+
+	const uint32_t w = cap->pending_w;
+	const uint32_t h = cap->pending_h;
+	cap->pending_resize = false;
+
+	if (w == 0 || h == 0 || (w == cap->width && h == cap->height))
+		return;
+
+	const OH_AVSCREEN_CAPTURE_ErrCode err = OH_AVScreenCapture_ResizeCanvas(cap->capture, (int32_t)w, (int32_t)h);
+	if (err == AV_SCREEN_CAPTURE_ERR_OK) {
+		cap->width = w;
+		cap->height = h;
+		blog(LOG_INFO, LOG_PREFIX "canvas followed window rect -> %ux%u", w, h);
+	} else {
+		blog(LOG_WARNING, LOG_PREFIX "ResizeCanvas to %ux%u failed with %d (canvas stays %ux%u)", w, h,
+		     (int)err, cap->width, cap->height);
+	}
+}
+
 static uint32_t window_capture_get_width(void *data)
 {
 	struct harmony_window_capture *cap = data;
+	window_capture_apply_pending_resize(cap);
 	return cap->width;
 }
 
@@ -472,10 +593,13 @@ static uint32_t window_capture_get_height(void *data)
 static void window_capture_get_defaults(obs_data_t *settings)
 {
 	obs_data_set_default_string(settings, "window", "");
-	/* The NDK exposes no display-metrics API to query the physical screen
-	 * resolution, so the canvas size is a user setting defaulting to 1080p. */
-	obs_data_set_default_int(settings, "width", 1920);
-	obs_data_set_default_int(settings, "height", 1080);
+	/* Default is follow mode: pin_size false, width/height 0. The canvas
+	 * seeds at the native display and then tracks the window's real rect
+	 * (content-changed callback) — the desktop-aligned behaviour. Pinning
+	 * a fixed size is opt-in via the properties checkbox. */
+	obs_data_set_default_int(settings, "width", 0);
+	obs_data_set_default_int(settings, "height", 0);
+	obs_data_set_default_bool(settings, "pin_size", false);
 	obs_data_set_default_int(settings, "frame_rate", 30);
 	obs_data_set_default_bool(settings, "capture_cursor", false);
 }
@@ -506,6 +630,7 @@ static obs_properties_t *window_capture_get_properties(void *data)
 		dstr_free(&value);
 	}
 
+	obs_properties_add_bool(props, "pin_size", obs_module_text("PinCaptureSize"));
 	obs_properties_add_int(props, "width", obs_module_text("CaptureWidth"), 16, 8192, 1);
 	obs_properties_add_int(props, "height", obs_module_text("CaptureHeight"), 16, 8192, 1);
 	obs_properties_add_int(props, "frame_rate", obs_module_text("FrameRate"), 1, 120, 1);
@@ -519,15 +644,23 @@ static void window_capture_update(void *data, obs_data_t *settings)
 	struct harmony_window_capture *cap = data;
 
 	const int32_t old_mission_id = cap->mission_id;
+	const bool old_pin = cap->pin_size;
 	const uint32_t old_width = cap->width;
 	const uint32_t old_height = cap->height;
 
 	const int32_t new_mission_id = parse_mission_id(obs_data_get_string(settings, "window"));
-	const uint32_t new_width = (uint32_t)obs_data_get_int(settings, "width");
-	const uint32_t new_height = (uint32_t)obs_data_get_int(settings, "height");
+	const bool new_pin = obs_data_get_bool(settings, "pin_size");
+	uint32_t new_width = (uint32_t)obs_data_get_int(settings, "width");
+	uint32_t new_height = (uint32_t)obs_data_get_int(settings, "height");
+	if (!new_pin || new_width == 0 || new_height == 0)
+		harmony_native_display_size(&new_width, &new_height);
 
-	const bool needs_restart = (new_mission_id != old_mission_id) || (new_width != old_width) ||
-				   (new_height != old_height);
+	/* Restart only on a genuine source change. In follow mode the canvas
+	 * moves on its own via the callback, so a width/height delta there is
+	 * not a user edit and must not re-prompt the picker; only a mission
+	 * change or a pin<->follow / pinned-size change warrants a restart. */
+	const bool size_changed = (new_pin != old_pin) || (new_pin && (new_width != old_width || new_height != old_height));
+	const bool needs_restart = (new_mission_id != old_mission_id) || size_changed;
 
 	window_capture_update_internal(cap, settings, needs_restart);
 }

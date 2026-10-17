@@ -82,7 +82,7 @@ export class IntentDispatcher {
 }
 
 /**
- * OBSIntentExecutor — W3 C3: "小艺，用 OBS 开始直播/开始录制".
+ * OBSIntentExecutor — W3 C3: "小艺，用轻录开始直播/开始录制".
  *
  * Registered in insight_intent.json (domain MediaDomain, foreground mode,
  * bound to EntryAbility). The framework launches/raises our UIAbility and

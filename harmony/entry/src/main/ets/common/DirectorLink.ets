@@ -105,15 +105,19 @@ export class DirectorLink {
       const msg = DirectorLink.messageOf(info);
       if (msg !== '') {
         DirectorLink.handleCommand(msg, sessionId);
+      } else {
+        // Silent drop is the worst debugging experience — dump what arrived.
+        Logger.warn(`${TAG}: receiveMessage without text payload: ${JSON.stringify(info)}`);
       }
     });
   }
 
-  /** EventCallbackInfo carries the text payload on `message`; the declared
-   * interface is broad, so read through a Record view. */
+  /** EventCallbackInfo carries the text payload on `msg` (SDK d.ts field
+   * name — NOT `message`; reading the wrong key silently drops every
+   * command, device-verified 10-04). Read through a Record view. */
   private static messageOf(info: abilityConnectionManager.EventCallbackInfo): string {
     const bag = info as Object as Record<string, Object>;
-    const raw = bag['message'];
+    const raw = bag['msg'];
     return typeof raw === 'string' ? raw : '';
   }
 

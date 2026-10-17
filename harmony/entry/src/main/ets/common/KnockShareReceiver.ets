@@ -59,6 +59,12 @@ export class KnockShareReceiver {
         windowId: windowId,
         capabilities: [
           { utd: utd.UniformDataType.IMAGE, maxSupportedCount: 5 },
+          // W3 C2 round-2 fix (device-verified 10-03): the sender shares
+          // finished clips as VIDEO, but this registry only declared IMAGE +
+          // PLAIN_TEXT — the capability handshake therefore refused us and
+          // the system routed the knock to the Gallery instead. VIDEO must
+          // be received for the clip-knock loop to land on OBS.
+          { utd: utd.UniformDataType.VIDEO, maxSupportedCount: 1 },
           // W3 C1: a tiny text payload knocked from any device is a
           // control signal ("obs-knock://camera"), not content — receive
           // plain text too.
@@ -109,21 +115,50 @@ export class KnockShareReceiver {
       }
       if (rec.uri && KnockShareReceiver.isImage(rec.utd)) {
         KnockShareReceiver.acceptImage(rec.uri);
+      } else if (rec.uri && KnockShareReceiver.isVideo(rec.utd)) {
+        KnockShareReceiver.acceptVideo(rec.uri);
       }
     }
   }
 
-  /** W3 C1: control-signal grammar. A knocked plain-text payload of
-   * "obs-knock://camera" mounts the Service Collaboration cross-device
-   * camera as a harmony_camera_capture source (device_id=@remote selects
-   * the CAMERA_CONNECTION_REMOTE entry in the plugin). Any other text is
-   * logged and ignored — an unknown signal must never do anything
+  /** W3 C2: a finished clip knocked back into OBS lands in the sandbox and
+   * is re-used as a media source when one is available; otherwise it is
+   * simply kept (stable path logged) so the user can browse it. */
+  private static acceptVideo(landedUri: string): void {
+    try {
+      KnockShareReceiver.counter += 1;
+      const rawName = landedUri.split('/').pop() ?? `video-${KnockShareReceiver.counter}.mp4`;
+      const name = `knock-${KnockShareReceiver.counter}-${rawName.replace(/[^A-Za-z0-9._-]/g, '_')}`;
+      const dir = `${ObsController.filesDir}/knock-videos`;
+      if (!fileIo.accessSync(dir)) {
+        fileIo.mkdirSync(dir, true);
+      }
+      const dest = `${dir}/${name}`;
+      const src = fileIo.openSync(landedUri, fileIo.OpenMode.READ_ONLY);
+      fileIo.copyFileSync(src.fd, dest);
+      fileIo.closeSync(src);
+      Logger.info(`${TAG}: video landed -> ${dest}`);
+    } catch (err) {
+      Logger.error(`${TAG}: acceptVideo failed`, Logger.asError(err as Object));
+    }
+  }
+
+  /** W3 C1 (revised): control-signal grammar. A knocked plain-text payload
+   * of "obs-knock://camera" arms the wireless-camera receiver: the producer
+   * adds the harmony_remote_camera source (RCTM over TCP), which the phone
+   * role page then feeds with its camera stream. The old meaning (Service
+   * Collaboration @remote camera) is retired — device-verified 10-04 that
+   * third parties can never mount CAMERA_CONNECTION_REMOTE. Any other text
+   * is logged and ignored — an unknown signal must never do anything
    * surprising. */
   private static handleSignal(content: string): void {
     const trimmed = content.trim();
     Logger.info(`${TAG}: signal payload "${trimmed}"`);
     if (trimmed === 'obs-knock://camera') {
-      ObsController.addSource('harmony_camera_capture', JSON.stringify({ device_id: '@remote' }));
+      // Same dedup as the Sources-panel button (10-04).
+      if (!ObsController.hasSourceNamed('无线机位')) {
+        ObsController.addSource('harmony_remote_camera', '{}', '无线机位');
+      }
     }
   }
 
@@ -157,11 +192,26 @@ export class KnockShareReceiver {
     return dir;
   }
 
+  /** Device-verified 10-03: the gallery knock arrives with the LEAF utd
+   * name ("general.jpeg"), not the category ("image") we declared — a
+   * substring test on 'image' silently dropped it (the file still landed
+   * in knock-drop but no source was created). Match both the category
+   * words and the known leaf extensions. */
   private static isImage(utdType: string): boolean {
-    return utdType.indexOf('image') >= 0;
+    const t = utdType.toLowerCase();
+    return t.indexOf('image') >= 0 || t.indexOf('jpeg') >= 0 || t.indexOf('jpg') >= 0
+      || t.indexOf('png') >= 0 || t.indexOf('gif') >= 0 || t.indexOf('bmp') >= 0
+      || t.indexOf('webp') >= 0 || t.indexOf('heic') >= 0;
   }
 
   private static isText(utdType: string): boolean {
-    return utdType.indexOf('text') >= 0;
+    const t = utdType.toLowerCase();
+    return t.indexOf('text') >= 0 || t === 'general.plain-text';
+  }
+
+  private static isVideo(utdType: string): boolean {
+    const t = utdType.toLowerCase();
+    return t.indexOf('video') >= 0 || t.indexOf('mp4') >= 0 || t.indexOf('mov') >= 0
+      || t.indexOf('matroska') >= 0 || t.indexOf('mkv') >= 0;
   }
 }

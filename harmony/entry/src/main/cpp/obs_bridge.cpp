@@ -47,6 +47,7 @@
 #define LOG_INFO OBS_LOG_INFO
 #define LOG_DEBUG OBS_LOG_DEBUG
 #include <graphics/graphics.h>
+#include <graphics/matrix4.h> // struct matrix4 full definition (box transform AABB)
 #include <util/base.h>
 #include <media-io/audio-io.h>
 #include <media-io/video-io.h>
@@ -54,6 +55,7 @@
 #include <obs-module.h>
 #include <obs-harmony-api.h>  // public surface only; obs-harmony.h drags in obs-internal.h
 #include <obs.h>
+#include <util/platform.h> // os_gettime_ns (web source feed timestamps)
 #undef LOG_ERROR
 #undef LOG_WARNING
 #undef LOG_INFO
@@ -137,20 +139,22 @@ napi_value GetUndefined(napi_env env)
 }
 
 // ===========================================================================
-// Audio capture tracks (desktop loopback + microphone)
+// Audio mixer tracks — REAL OBS sources, not shadow capturers.
 //
-// Desktop audio is HarmonyOS playback capture ("内录"): API 23+/26 provides
-// OH_AudioCapturer_RequestPlaybackCaptureStart with mode
-// MEDIA|EXCLUDING_SELF. IMPORTANT: that request is ASYNC — a successful
-// return only means "submitted"; the actual result (including whether the
-// user approved the system privacy dialog) arrives in
-// OnPlaybackCaptureStartResult as SUCCESS / NOT_AUTHORIZED / FAILED. The
-// track state machine below models exactly that, and nativeGetAudioTracks()
-// reports it honestly to the UI.
+// The mixer used to run its own two OH_AudioCapturers purely to paint the
+// meters, while the actual recorded/streamed audio was produced by the
+// harmony_mic_capture / harmony_desktop_audio OBS sources. That was a
+// "phantom mixer": the faders and mute changed meters that fed nothing, and
+// what you heard in the recording was out of the mixer's control (user
+// report 10-17). Now one track per live audio SOURCE: we enumerate every
+// input source that carries OBS_SOURCE_AUDIO, attach an obs_volmeter to it
+// for the level meter, and route mute/volume straight to the source
+// (obs_source_set_muted / set_volume) so the mixer is the single knob for
+// program audio — exactly like the desktop OBS mixer.
+//
+// The old async loopback authorization lives in the desktop-audio plugin
+// now; the bridge just reads whether the source is active.
 // ===========================================================================
-
-constexpr const char *TRACK_DESKTOP_ID = "desktop-audio";
-constexpr const char *TRACK_MIC_ID = "mic-audio";
 
 // Mirrored 1:1 in ArkTS — see types/libobs_bridge/index.d.ts (NativeAudioTrack.state).
 enum class CaptureState : int32_t {
@@ -162,172 +166,209 @@ enum class CaptureState : int32_t {
     Failed = 5,
 };
 
-struct AudioTrack {
-    const char *id;
-    const char *name;
-    bool loopback; // true = desktop playback capture, false = microphone
-    std::atomic<CaptureState> state{CaptureState::Idle};
-    std::atomic<bool> muted{false};
-    std::atomic<float> volume{1.0f}; // linear 0..1
-    std::atomic<float> peak{0.0f};   // linear 0..1, latest buffer
-    std::atomic<float> rms{0.0f};    // linear 0..1, latest buffer
-    // builder/capturer are guarded by g_audioMutex.
-    OH_AudioStreamBuilder *builder = nullptr;
-    OH_AudioCapturer *capturer = nullptr;
+#ifdef HAVE_LIBOBS
+
+// One mixer track == one live audio obs_source_t. We hold only a WEAK
+// reference: a strong ref here would keep a source alive forever after the
+// user deletes it from the scene (it would linger as an un-removable mixer
+// row — the orphan bug of 10-17). obs_weak_source_get_source() upgrades to a
+// temporary strong ref exactly where we touch the source; the attached
+// volmeter auto-detaches via the source's destroy signal.
+struct SourceTrack {
+    std::string uuid;
+    obs_weak_source_t *weak = nullptr; // owned weak ref
+    obs_volmeter_t *meter = nullptr;
+    std::atomic<float> peak{0.0f};    // linear 0..1, latest meter frame
+    std::atomic<float> rms{0.0f};     // linear 0..1, latest meter frame
+    std::atomic<int64_t> lastNs{0};   // last meter callback; drives decay
+    bool seen = false;                // reconciler scratch (per GetAudioTracks)
 };
 
 std::mutex g_audioMutex;
-AudioTrack g_desktopTrack{TRACK_DESKTOP_ID, "Desktop Audio", true};
-AudioTrack g_micTrack{TRACK_MIC_ID, "Microphone", false};
+static std::map<std::string, SourceTrack *> g_audioTracks; // keyed by source uuid
 
-void OnAudioReadData(OH_AudioCapturer * /*capturer*/, void *userData, void *audioData,
-                     int32_t audioDataSize)
+// Upgrade a track's weak ref to a temporary strong ref (nullptr if the
+// source is already gone). Caller must obs_source_release() the result.
+static obs_source_t *LockTrackSource(SourceTrack *track)
 {
-    // Runs on the audio service's capture thread. Configured format is
-    // 48 kHz stereo S16LE (see StartTrack). Keep this cheap: meters only.
-    // Under HAVE_LIBOBS this is also the point where the PCM buffer will be
-    // handed to libobs's audio pipeline (obs_source_output_audio via a
-    // dedicated capture source) once the audio feed plumbing lands.
-    AudioTrack *track = static_cast<AudioTrack *>(userData);
-    if (track == nullptr || audioData == nullptr || audioDataSize <= 0) {
-        return;
+    if (track->weak == nullptr) {
+        return nullptr;
     }
-    const float gain = track->muted.load(std::memory_order_relaxed)
-                           ? 0.0f
-                           : track->volume.load(std::memory_order_relaxed);
-    const int16_t *samples = static_cast<const int16_t *>(audioData);
-    const size_t count = static_cast<size_t>(audioDataSize) / sizeof(int16_t);
-    float peak = 0.0f;
-    double sumSquares = 0.0;
-    for (size_t i = 0; i < count; ++i) {
-        const float s = (static_cast<float>(samples[i]) / 32768.0f) * gain;
-        const float a = std::fabs(s);
-        if (a > peak) {
-            peak = a;
-        }
-        sumSquares += static_cast<double>(s) * static_cast<double>(s);
-    }
-    const float rms = count > 0 ? static_cast<float>(std::sqrt(sumSquares / static_cast<double>(count))) : 0.0f;
-    track->peak.store(peak, std::memory_order_relaxed);
-    track->rms.store(rms, std::memory_order_relaxed);
+    return obs_weak_source_get_source(track->weak);
 }
 
-void OnPlaybackCaptureStartResult(OH_AudioCapturer * /*capturer*/, void *userData,
-                                  OH_AudioStream_PlaybackCaptureStartState state)
+// Runs on the libobs audio thread. magnitude/peak are dBFS; fold to a linear
+// 0..1 multiplier for the existing meter UI and stamp the update time.
+static float clamp01f(float v)
 {
-    AudioTrack *track = static_cast<AudioTrack *>(userData);
+    return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+}
+
+void OnMeterUpdated(void *param, const float magnitude[MAX_AUDIO_CHANNELS],
+                    const float peak[MAX_AUDIO_CHANNELS],
+                    const float input_peak[MAX_AUDIO_CHANNELS])
+{
+    SourceTrack *track = static_cast<SourceTrack *>(param);
     if (track == nullptr) {
         return;
     }
-    switch (state) {
-        case AUDIOSTREAM_PLAYBACKCAPTURE_START_STATE_SUCCESS:
-            track->state.store(CaptureState::Running);
-            OH_LOG_INFO(LOG_APP, "desktop loopback authorized + running");
-            break;
-        case AUDIOSTREAM_PLAYBACKCAPTURE_START_STATE_NOT_AUTHORIZED:
-            track->state.store(CaptureState::NotAuthorized);
-            OH_LOG_WARN(LOG_APP, "desktop loopback NOT authorized (privacy dialog denied)");
-            break;
-        default:
-            track->state.store(CaptureState::Failed);
-            OH_LOG_ERROR(LOG_APP, "desktop loopback start failed, state=%{public}d",
-                         static_cast<int>(state));
-            break;
-    }
-}
-
-bool StartTrack(AudioTrack &track)
-{
-    std::lock_guard<std::mutex> lock(g_audioMutex);
-    if (track.capturer != nullptr) {
-        return true; // already built/running
-    }
-    track.peak.store(0.0f);
-    track.rms.store(0.0f);
-
-    OH_AudioStream_Result r = OH_AudioStreamBuilder_Create(&track.builder, AUDIOSTREAM_TYPE_CAPTURER);
-    if (r != AUDIOSTREAM_SUCCESS || track.builder == nullptr) {
-        OH_LOG_ERROR(LOG_APP, "builder create failed for %{public}s: %{public}d", track.id, r);
-        track.state.store(CaptureState::Failed);
-        return false;
-    }
-    OH_AudioStreamBuilder_SetCapturerInfo(track.builder, AUDIOSTREAM_SOURCE_TYPE_MIC);
-    OH_AudioStreamBuilder_SetSamplingRate(track.builder, 48000);
-    OH_AudioStreamBuilder_SetChannelCount(track.builder, 2);
-    OH_AudioStreamBuilder_SetSampleFormat(track.builder, AUDIOSTREAM_SAMPLE_S16LE);
-    OH_AudioStreamBuilder_SetCapturerReadDataCallback(track.builder, &OnAudioReadData, &track);
-
-    if (track.loopback) {
-        // Desktop loopback: capture media playback, excluding our own output.
-        // PC/2in1 support of SystemCapability.Multimedia.Audio.PlaybackCapture is
-        // UNVERIFIED (official docs list Phone/Tablet/TV), so failure here —
-        // or NOT_AUTHORIZED in the async callback — is a normal, surfaced
-        // outcome, not a bug. The UI reports it as such.
-        OH_AudioStreamBuilder_SetPlaybackCaptureMode(
-            track.builder, AUDIOSTREAM_PLAYBACKCAPTURE_MODE_MEDIA |
-                               AUDIOSTREAM_PLAYBACKCAPTURE_MODE_EXCLUDING_SELF);
-    }
-
-    r = OH_AudioStreamBuilder_GenerateCapturer(track.builder, &track.capturer);
-    OH_AudioStreamBuilder_Destroy(track.builder);
-    track.builder = nullptr;
-    if (r != AUDIOSTREAM_SUCCESS || track.capturer == nullptr) {
-        OH_LOG_ERROR(LOG_APP, "generate capturer failed for %{public}s: %{public}d", track.id, r);
-        track.state.store(CaptureState::Failed);
-        return false;
-    }
-
-    if (track.loopback) {
-        track.state.store(CaptureState::Requesting);
-        r = OH_AudioCapturer_RequestPlaybackCaptureStart(track.capturer,
-                                                         &OnPlaybackCaptureStartResult, &track);
-        if (r != AUDIOSTREAM_SUCCESS) {
-            OH_LOG_ERROR(LOG_APP, "RequestPlaybackCaptureStart submit failed: %{public}d", r);
-            track.state.store(CaptureState::Failed);
-            return false;
+    float maxMagDb = magnitude[0];
+    float maxPeakDb = peak[0];
+    for (int i = 1; i < MAX_AUDIO_CHANNELS; ++i) {
+        if (magnitude[i] > maxMagDb) {
+            maxMagDb = magnitude[i];
         }
-        // ASYNC by design: the request is submitted; the outcome (success or
-        // privacy-dialog denial) lands in OnPlaybackCaptureStartResult. Do NOT
-        // report Running here.
-        OH_LOG_INFO(LOG_APP, "desktop loopback start requested (async authorization pending)");
-        return true;
+        if (peak[i] > maxPeakDb) {
+            maxPeakDb = peak[i];
+        }
     }
-
-    // Microphone: plain capturer, requires ohos.permission.MICROPHONE to have
-    // been granted (requested in EntryAbility). Without it Start() fails and
-    // the track reports Failed; the UI can re-trigger after granting.
-    r = OH_AudioCapturer_Start(track.capturer);
-    track.state.store(r == AUDIOSTREAM_SUCCESS ? CaptureState::Running : CaptureState::Failed);
-    OH_LOG_INFO(LOG_APP, "mic capturer start result: %{public}d", r);
-    return r == AUDIOSTREAM_SUCCESS;
+    if (maxMagDb < -90.0f) {
+        maxMagDb = -90.0f;
+    }
+    if (maxPeakDb < -90.0f) {
+        maxPeakDb = -90.0f;
+    }
+    track->rms.store(clamp01f(obs_db_to_mul(maxMagDb)), std::memory_order_relaxed);
+    track->peak.store(clamp01f(obs_db_to_mul(maxPeakDb)), std::memory_order_relaxed);
+    track->lastNs.store(os_gettime_ns(), std::memory_order_relaxed);
+    (void)input_peak;
 }
 
-void StopTrack(AudioTrack &track)
+// Register/update a mixer track for one audio source. Scope is decided by
+// the caller: NativeGetAudioTracks snapshots the items of every registered
+// scene, so a source that is in NO scene (an orphan left behind by a buggy
+// remove path) never gets a row — and a track whose source vanished from all
+// scenes is pruned below.
+static void RegisterAudioSource(obs_source_t *source)
 {
-    std::lock_guard<std::mutex> lock(g_audioMutex);
-    if (track.capturer != nullptr) {
-        OH_AudioCapturer_Stop(track.capturer);
-        OH_AudioCapturer_Release(track.capturer);
-        track.capturer = nullptr;
+    if (obs_source_get_type(source) != OBS_SOURCE_TYPE_INPUT) {
+        return;
     }
-    track.state.store(CaptureState::Idle);
-    track.peak.store(0.0f);
-    track.rms.store(0.0f);
+    if ((obs_source_get_output_flags(source) & OBS_SOURCE_AUDIO) == 0) {
+        return;
+    }
+    const char *uuidRaw = obs_source_get_uuid(source);
+    const std::string uuid = uuidRaw != nullptr ? uuidRaw : "";
+    if (uuid.empty()) {
+        return;
+    }
+    auto it = g_audioTracks.find(uuid);
+    if (it == g_audioTracks.end()) {
+        obs_weak_source_t *weak = obs_source_get_weak_source(source);
+        if (weak == nullptr) {
+            return;
+        }
+        SourceTrack *track = new SourceTrack();
+        track->uuid = uuid;
+        track->weak = weak;
+        track->seen = true;
+        track->meter = obs_volmeter_create(OBS_FADER_LOG);
+        if (track->meter != nullptr) {
+            obs_volmeter_set_peak_meter_type(track->meter, SAMPLE_PEAK_METER);
+            obs_volmeter_attach_source(track->meter, source);
+            obs_volmeter_add_callback(track->meter, &OnMeterUpdated, track);
+        }
+        g_audioTracks[uuid] = track;
+    } else {
+        it->second->seen = true;
+    }
 }
 
-napi_value BuildTrackObject(napi_env env, const AudioTrack &track)
+// Walk one scene's items, collecting strong refs to each audio source into
+// the snapshot vector (caller releases them after registration).
+static bool CollectSceneAudioRef(obs_scene_t * /*scene*/, obs_sceneitem_t *item, void *param)
+{
+    auto *out = static_cast<std::vector<obs_source_t *> *>(param);
+    obs_source_t *src = obs_sceneitem_get_source(item);
+    if (src != nullptr) {
+        obs_source_t *ref = obs_source_get_ref(src);
+        if (ref != nullptr) {
+            out->push_back(ref);
+        }
+    }
+    return true;
+}
+
+// Destroy + erase every track the last enum pass did not see (source removed).
+void PruneAudioTracksLocked()
+{
+    for (auto it = g_audioTracks.begin(); it != g_audioTracks.end();) {
+        if (it->second->seen) {
+            ++it;
+            continue;
+        }
+        SourceTrack *track = it->second;
+        if (track->meter != nullptr) {
+            obs_volmeter_remove_callback(track->meter, &OnMeterUpdated, track);
+            obs_volmeter_detach_source(track->meter);
+            obs_volmeter_destroy(track->meter);
+        }
+        if (track->weak != nullptr) {
+            obs_weak_source_release(track->weak);
+        }
+        delete track;
+        it = g_audioTracks.erase(it);
+    }
+}
+
+napi_value BuildTrackObject(napi_env env, SourceTrack *track)
 {
     napi_value obj = nullptr;
     napi_create_object(env, &obj);
-    SetProperty(env, obj, "id", CreateString(env, track.id));
-    SetProperty(env, obj, "name", CreateString(env, track.name));
-    SetProperty(env, obj, "muted", CreateBool(env, track.muted.load()));
-    SetProperty(env, obj, "volume", CreateDouble(env, track.volume.load()));
-    SetProperty(env, obj, "state", CreateInt32(env, static_cast<int32_t>(track.state.load())));
-    const bool supported =
-        track.loopback ? (track.state.load() != CaptureState::Unsupported) : true;
-    SetProperty(env, obj, "supported", CreateBool(env, supported));
+    SetProperty(env, obj, "id", CreateString(env, track->uuid));
+    // Temporary strong ref for the reads below; the source cannot die while
+    // we hold it.
+    obs_source_t *source = LockTrackSource(track);
+    const char *nameRaw = source != nullptr ? obs_source_get_name(source) : nullptr;
+    SetProperty(env, obj, "name", CreateString(env, nameRaw != nullptr ? nameRaw : ""));
+    SetProperty(env, obj, "muted", CreateBool(env, source != nullptr && obs_source_muted(source)));
+    SetProperty(env, obj, "volume",
+                CreateDouble(env, source != nullptr ? obs_source_get_volume(source) : 0.0));
+    // The capture plugins mirror their real state (incl. the async loopback
+    // authorization: Requesting / NotAuthorized / Failed) into the source's
+    // private settings; prefer that over the bare active flag. A source that
+    // never published (older plugin, non-harmony audio source) falls back
+    // to active ? Running : Idle.
+    int32_t state = (source != nullptr && obs_source_active(source))
+                        ? static_cast<int32_t>(CaptureState::Running)
+                        : static_cast<int32_t>(CaptureState::Idle);
+    if (source != nullptr) {
+        obs_data_t *ps = obs_source_get_private_settings(source);
+        if (ps != nullptr) {
+            const long long published = obs_data_get_int(ps, "harmony_capture_state");
+            obs_data_release(ps);
+            if (published >= 1 && published <= 5) {
+                state = static_cast<int32_t>(published);
+            }
+        }
+        obs_source_release(source);
+    }
+    SetProperty(env, obj, "state", CreateInt32(env, state));
+    SetProperty(env, obj, "supported", CreateBool(env, true));
     return obj;
+}
+
+#endif // HAVE_LIBOBS
+
+// Free the track registry (used by ShutdownCore; safe in both build modes).
+void ReleaseAllAudioTracks()
+{
+#ifdef HAVE_LIBOBS
+    std::lock_guard<std::mutex> lock(g_audioMutex);
+    for (auto &entry : g_audioTracks) {
+        SourceTrack *track = entry.second;
+        if (track->meter != nullptr) {
+            obs_volmeter_remove_callback(track->meter, &OnMeterUpdated, track);
+            obs_volmeter_detach_source(track->meter);
+            obs_volmeter_destroy(track->meter);
+        }
+        if (track->weak != nullptr) {
+            obs_weak_source_release(track->weak);
+        }
+        delete track;
+    }
+    g_audioTracks.clear();
+#endif
 }
 
 // ===========================================================================
@@ -558,6 +599,21 @@ std::map<std::string, obs_scene_t *> g_scenes; // scene source UUID -> scene
  * transitions (created lazily in NativeSelectScene; guarded by
  * g_sceneMutex). */
 obs_source_t *g_programTransition = nullptr;
+/* Type id the program transition shell was created with (fade_transition by
+ * default). A type change rebuilds the shell around the currently visible
+ * source — see NativeSetTransitionType. */
+std::string g_programTransitionId = "fade_transition";
+
+/* Studio mode (opt-in). The program/preview split mirrors the desktop
+ * frontend: the main canvas (channel 0) is PROGRAM — what records and
+ * streams; a private PREVIEW canvas holds the scene the operator has
+ * selected but not yet taken. A second XComponent display renders the
+ * preview canvas (see xcomp::AttachStudioPreview). All guarded by
+ * g_sceneMutex; created lazily the first time studio mode is entered and
+ * left alive for the process (tearing a canvas down mid-frame races the
+ * video thread). */
+obs_canvas_t *g_previewCanvas = nullptr;
+std::string g_previewSceneId; // scene uuid bound to the preview canvas, if any
 
 struct SceneItemEnumCtx {
     int64_t wantedId = -1;
@@ -707,8 +763,9 @@ napi_value NativeInit(napi_env env, napi_callback_info info)
         {
             static const char *const kPlugins[] = {
                 "harmony-capture", "harmony-audio", "harmony-camera", "harmony-vcodec",
-                "obs-ffmpeg",      "obs-filters",   "obs-outputs",    "obs-transitions",
-                "obs-x264",        "rtmp-services", "image-source",   "text-freetype2",
+                "harmony-remotecam", "harmony-web",  "obs-ffmpeg",   "obs-filters",    "obs-outputs",
+                "obs-transitions", "obs-x264",      "rtmp-services",  "image-source",
+                "text-freetype2",
             };
             for (const char *name : kPlugins) {
                 char bin[512], data[512];
@@ -761,28 +818,29 @@ napi_value NativeInit(napi_env env, napi_callback_info info)
     (void)configDir;
 #endif
 
-    // Audio capture tracks are HarmonyOS-native and live in BOTH modes, so
-    // the mixer meters show real signal even before the core port lands.
-    /* NOT on the calling (main) thread: OH_AudioCapturer_Start is a
-     * synchronous IPC into audio_server, and after a force-stop churn the
-     * server serialises it behind the dying session's teardown — measured
-     * blocking the main thread 20+ s (THREAD_BLOCK_6S → kill). The tracks'
-     * state is atomic and the ArkTS mixer polls it, so a detached starter
-     * thread costs the UI nothing. (ANR investigation 10-03: the old
-     * "obs_reset_video blocks" attribution was wrong — the block lands
-     * right after the OHAudioCapturer callback-setup lines, before
-     * "mic capturer start result" ever prints.) */
-    std::thread([] {
-        StartTrack(g_desktopTrack);
-        StartTrack(g_micTrack);
-    }).detach();
+    // The mixer is source-driven (see the audio tracks block above): no
+    // shadow capturers start here anymore. The mic/desktop SOURCES capture
+    // audio themselves when a scene holds them; the mixer discovers them
+    // via obs_enum_sources on its poll.
     return CreateBool(env, coreOk);
+}
+
+/* Kept as a no-op for ABI compatibility with the ArkTS wrapper. The
+ * desktop-audio SOURCE now requests its own loopback authorization when it
+ * activates (see plugins/harmony-audio/desktop-audio.c on_start_state), so
+ * there is nothing for the bridge to pre-start. */
+napi_value NativeEnsureDesktopAudio(napi_env env, napi_callback_info /*info*/)
+{
+    return CreateBool(env, true);
 }
 
 void ShutdownCore()
 {
 #ifdef HAVE_LIBOBS
     StopStatsThread();
+    // Release mixer tracks (volmeters + source refs) while the core is
+    // still alive, before the scene teardown and obs_shutdown below.
+    ReleaseAllAudioTracks();
     {
         std::lock_guard<std::mutex> lock(g_outputMutex);
         if (g_streamOutput != nullptr) {
@@ -821,8 +879,6 @@ void ShutdownCore()
         obs_shutdown();
     }
 #endif
-    StopTrack(g_desktopTrack);
-    StopTrack(g_micTrack);
     xcomp::ResetAll();
     std::lock_guard<std::mutex> lock(g_statsMutex);
     if (g_statsTsf != nullptr) {
@@ -852,6 +908,101 @@ napi_value NativeAttachPreviewSurface(napi_env env, napi_callback_info info)
 napi_value NativeDetachPreviewSurface(napi_env env, napi_callback_info /*info*/)
 {
     xcomp::DetachPreview();
+    return GetUndefined(env);
+}
+
+/* ---- Studio mode (opt-in) ------------------------------------------------
+ * The program/preview split. The preview canvas is created with ACTIVATE |
+ * EPHEMERAL (the DEVICE preset), NOT the PREVIEW preset: our capture sources
+ * only start on obs_source_activate(MAIN_VIEW) (obs-source.c: activate_refs
+ * is bumped for MAIN_VIEW only), and a canvas's view is MAIN_VIEW iff it has
+ * the ACTIVATE flag (obs-canvas.c:159). A PREVIEW-preset (AUX) canvas would
+ * never activate the camera/display and the preview would stay black.
+ * EPHEMERAL keeps it out of the saved profile. */
+
+/* nativeSetPreviewScene(id) -> bool. Binds a registered scene to the private
+ * preview canvas (creating the canvas on first call). This is the studio-mode
+ * "preview" selection; the program canvas is untouched until Take/Cut. */
+napi_value NativeSetPreviewScene(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id;
+    if (argc < 1 || !GetStringArg(env, args[0], id)) {
+        return ThrowError(env, "nativeSetPreviewScene(id): argument must be a string");
+    }
+#ifndef HAVE_LIBOBS
+    (void)id;
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    auto it = g_scenes.find(id);
+    if (it == g_scenes.end()) {
+        return CreateBool(env, false);
+    }
+    if (g_previewCanvas == nullptr) {
+        struct obs_video_info ovi;
+        if (!obs_get_video_info(&ovi)) {
+            return CreateBool(env, false);
+        }
+        g_previewCanvas = obs_canvas_create_private("harmony_preview", &ovi, ACTIVATE | EPHEMERAL);
+        if (g_previewCanvas == nullptr) {
+            OH_LOG_ERROR(LOG_APP, "studio: obs_canvas_create_private failed");
+            return CreateBool(env, false);
+        }
+    }
+    obs_canvas_set_channel(g_previewCanvas, 0, obs_scene_get_source(it->second));
+    g_previewSceneId = id;
+    return CreateBool(env, true);
+#endif
+}
+
+/* nativeGetPreviewSceneId() -> the scene uuid currently on the preview
+ * canvas ('' when studio mode has not bound one) — lets the scene list
+ * highlight the preview row separately from the program row. */
+napi_value NativeGetPreviewSceneId(napi_env env, napi_callback_info /*info*/)
+{
+#ifndef HAVE_LIBOBS
+    return CreateString(env, "");
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    return CreateString(env, g_previewSceneId);
+#endif
+}
+
+/* nativeAttachStudioPreviewSurface(xcomponentId) -> bool. Points the second
+ * display at the preview canvas. Requires nativeSetPreviewScene to have run
+ * first (creates the canvas). */
+napi_value NativeAttachStudioPreviewSurface(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string xcomponentId;
+    if (argc < 1 || !GetStringArg(env, args[0], xcomponentId)) {
+        return ThrowError(env, "nativeAttachStudioPreviewSurface(id): argument must be a string");
+    }
+#ifndef HAVE_LIBOBS
+    (void)xcomponentId;
+    return ThrowCoreNotLinked(env);
+#else
+    void *canvas;
+    {
+        std::lock_guard<std::mutex> lock(g_sceneMutex);
+        canvas = g_previewCanvas;
+    }
+    if (canvas == nullptr) {
+        OH_LOG_ERROR(LOG_APP, "studio: attach preview display before a preview scene is set");
+        return CreateBool(env, false);
+    }
+    return CreateBool(env, xcomp::AttachStudioPreview(xcomponentId, canvas));
+#endif
+}
+
+napi_value NativeDetachStudioPreviewSurface(napi_env env, napi_callback_info /*info*/)
+{
+    xcomp::DetachStudioPreview();
     return GetUndefined(env);
 }
 
@@ -931,9 +1082,44 @@ napi_value NativeRemoveScene(napi_env env, napi_callback_info info)
     if (it == g_scenes.end()) {
         return CreateBool(env, false);
     }
+    /* Studio mode: if the preview canvas was staging this scene, drop the
+     * binding so the second display does not keep rendering a removed
+     * source (the canvas channel holds its own reference otherwise). */
+    if (g_previewCanvas != nullptr && g_previewSceneId == id) {
+        obs_canvas_set_channel(g_previewCanvas, 0, nullptr);
+        g_previewSceneId.clear();
+    }
     obs_source_remove(obs_scene_get_source(it->second));
     obs_scene_release(it->second);
     g_scenes.erase(it);
+    return CreateBool(env, true);
+#endif
+}
+
+/* nativeRenameScene(id, name): rename the scene's source (the scene list
+ * reads names from obs_source_get_name, so the UI follows automatically). */
+napi_value NativeRenameScene(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id, name;
+    if (argc < 2 || !GetStringArg(env, args[0], id) || !GetStringArg(env, args[1], name)) {
+        return ThrowError(env, "nativeRenameScene(id, name): bad arguments");
+    }
+#ifndef HAVE_LIBOBS
+    (void)id; (void)name;
+    return ThrowCoreNotLinked(env);
+#else
+    if (name.empty()) {
+        return CreateBool(env, false);
+    }
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    auto it = g_scenes.find(id);
+    if (it == g_scenes.end()) {
+        return CreateBool(env, false);
+    }
+    obs_source_set_name(obs_scene_get_source(it->second), name.c_str());
     return CreateBool(env, true);
 #endif
 }
@@ -961,6 +1147,7 @@ bool SourceCollectCallback(obs_scene_t * /*scene*/, obs_sceneitem_t *item, void 
                 CreateString(ctx->env,
                              source != nullptr ? obs_source_get_unversioned_id(source) : ""));
     SetProperty(ctx->env, obj, "visible", CreateBool(ctx->env, obs_sceneitem_visible(item)));
+    SetProperty(ctx->env, obj, "locked", CreateBool(ctx->env, obs_sceneitem_locked(item)));
     napi_set_element(ctx->env, ctx->array, ctx->index++, obj);
     return true; // continue enumeration
 }
@@ -1031,6 +1218,37 @@ napi_value NativeAddSource(napi_env env, napi_callback_info info)
     }
     obs_sceneitem_t *item = obs_scene_add(it->second, source);
     const int64_t itemId = obs_sceneitem_get_id(item);
+    // Fit-to-canvas on add for oversized sources (a raw 4000x3000 knock-in
+    // photo or a 3120x2080 display capture must not spill across the
+    // preview). Implemented as an EXPLICIT SCALE bake, not a bounds clamp:
+    // OBS_BOUNDS_SCALE_INNER normalises the item scale away, which silently
+    // breaks pinch-zoom (set_scale changes nothing on screen — user report
+    // 10-14: "捏合能缩放摄像头，但缩放捕获屏幕不太行") and makes the
+    // selection box report the letterboxed bounds rather than the content.
+    // A baked scale keeps the item in free-transform mode, so pinch/drag and
+    // the box all behave like the camera source does. SHRINK-ONLY gate: a
+    // small source stays at natural size (desktop parity).
+    {
+        struct obs_video_info ovi;
+        const uint32_t sw = obs_source_get_width(source);
+        const uint32_t sh = obs_source_get_height(source);
+        if (obs_get_video_info(&ovi) && sw > 0 && sh > 0 &&
+            (sw > ovi.base_width || sh > ovi.base_height)) {
+            const float fit = fminf((float)ovi.base_width / (float)sw,
+                                    (float)ovi.base_height / (float)sh);
+            struct vec2 scale;
+            vec2_set(&scale, fit, fit);
+            obs_sceneitem_set_scale(item, &scale);
+            /* Centre the shrunk item on the canvas (was the bounds
+             * alignment default). pos is the top-left in absolute px. */
+            const float w = (float)sw * fit;
+            const float h = (float)sh * fit;
+            struct vec2 pos;
+            vec2_set(&pos, ((float)ovi.base_width - w) * 0.5f,
+                     ((float)ovi.base_height - h) * 0.5f);
+            obs_sceneitem_set_pos(item, &pos);
+        }
+    }
     obs_source_release(source);
     return CreateString(env, std::to_string(itemId));
 #endif
@@ -1052,9 +1270,11 @@ napi_value NativeRemoveSource(napi_env env, napi_callback_info info)
     std::lock_guard<std::mutex> lock(g_sceneMutex);
     obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
     if (item == nullptr) {
+        OH_LOG_WARN(LOG_APP, "nativeRemoveSource: no scene item for id '%{public}s'", id.c_str());
         return CreateBool(env, false);
     }
     obs_sceneitem_remove(item);
+    OH_LOG_INFO(LOG_APP, "nativeRemoveSource: removed scene item '%{public}s'", id.c_str());
     return CreateBool(env, true);
 #endif
 }
@@ -1080,6 +1300,1030 @@ napi_value NativeSetSourceVisible(napi_env env, napi_callback_info info)
         return CreateBool(env, false);
     }
     return CreateBool(env, obs_sceneitem_set_visible(item, visible));
+#endif
+}
+
+/* ---- Canvas interaction (W4: source select / move / scale) ------------
+ * The ArkUI gesture layer above the preview XComponent needs the item's
+ * bounding box in canvas coordinates to (a) hit-test taps and (b) draw the
+ * selection outline; move/scale map drag and pinch deltas onto the item.
+ * All coordinates are canvas px (base_width x base_height), top-left
+ * origin — the ArkUI layer owns the canvas→view transform. */
+
+/* nativeGetSourceBounds(id) -> JSON '{"x":..,"y":..,"w":..,"h":..}' of the
+ * item's axis-aligned bounding box, or '' when the item is gone.
+ * Uses obs_sceneitem_get_box_transform — the same box transform the desktop
+ * selection outline consumes — so fit-to-canvas sources (OBS_BOUNDS_SCALE_
+ * INNER, where the rendered size is the BOUNDS not source×scale, and the
+ * bounds alignment shifts the box off pos) report the true rendered rect
+ * (user report 10-14: "红框有时大小也和画面不一致"). */
+napi_value NativeGetSourceBounds(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id;
+    if (argc < 1 || !GetStringArg(env, args[0], id)) {
+        return ThrowError(env, "nativeGetSourceBounds(id): argument must be a string");
+    }
+#ifndef HAVE_LIBOBS
+    (void)id;
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    if (item == nullptr) {
+        return CreateString(env, "");
+    }
+    struct matrix4 m;
+    obs_sceneitem_get_box_transform(item, &m);
+    /* box_transform maps a UNIT box (corners (0,0),(1,0),(0,1),(1,1)) to the
+     * item's rendered rect in canvas space — the box scale is ALREADY baked
+     * into the matrix (this is exactly how the desktop selection outline uses
+     * it). The earlier version multiplied the corners by obs_sceneitem_get_
+     * box_scale as well, squaring the extent (a full-canvas source reported
+     * 1920×1920 → 3686400 px, so the outline blew up to fill the whole panel
+     * while the picture rendered at true size — user report 10-14 "红框和摄
+     * 像头不在一起"). matrix4 is row-vector: p' = p.x*m.x + p.y*m.y + m.t. */
+    double minX = 1e30, minY = 1e30, maxX = -1e30, maxY = -1e30;
+    const float px[4] = {0.0f, 1.0f, 0.0f, 1.0f};
+    const float py[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+    for (int i = 0; i < 4; i++) {
+        const double ox = (double)px[i] * m.x.x + (double)py[i] * m.y.x + m.t.x;
+        const double oy = (double)px[i] * m.x.y + (double)py[i] * m.y.y + m.t.y;
+        if (ox < minX) minX = ox;
+        if (ox > maxX) maxX = ox;
+        if (oy < minY) minY = oy;
+        if (oy > maxY) maxY = oy;
+    }
+    char buf[128];
+    snprintf(buf, sizeof(buf), "{\"x\":%.2f,\"y\":%.2f,\"w\":%.2f,\"h\":%.2f}",
+             minX, minY, maxX - minX, maxY - minY);
+    return CreateString(env, buf);
+#endif
+}
+
+/* nativeSetSourcePosition(id, x, y): canvas-px top-left position. */
+napi_value NativeSetSourcePosition(napi_env env, napi_callback_info info)
+{
+    size_t argc = 3;
+    napi_value args[3] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id;
+    double x = 0, y = 0;
+    if (argc < 3 || !GetStringArg(env, args[0], id) || napi_get_value_double(env, args[1], &x) != napi_ok ||
+        napi_get_value_double(env, args[2], &y) != napi_ok) {
+        return ThrowError(env, "nativeSetSourcePosition(id, x, y): bad arguments");
+    }
+#ifndef HAVE_LIBOBS
+    (void)id; (void)x; (void)y;
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    if (item == nullptr) {
+        return CreateBool(env, false);
+    }
+    struct vec2 pos;
+    vec2_set(&pos, x, y);
+    obs_sceneitem_set_pos(item, &pos);
+    return CreateBool(env, true);
+#endif
+}
+
+/* nativeSetSourceRect(id, x, y, w, h): set the item's rendered rect in
+ * canvas px (top-left + size). Backs the corner-handle resize gesture —
+ * ArkTS owns the anchor math, this just commits an absolute box. Bounds are
+ * cleared (a bounded item ignores scale), and the scale is derived from the
+ * source's natural size so the picture fills exactly w×h. All coordinates
+ * are absolute canvas px, matching get_source_bounds. */
+napi_value NativeSetSourceRect(napi_env env, napi_callback_info info)
+{
+    size_t argc = 5;
+    napi_value args[5] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id;
+    double x = 0, y = 0, w = 0, h = 0;
+    if (argc < 5 || !GetStringArg(env, args[0], id) || napi_get_value_double(env, args[1], &x) != napi_ok ||
+        napi_get_value_double(env, args[2], &y) != napi_ok || napi_get_value_double(env, args[3], &w) != napi_ok ||
+        napi_get_value_double(env, args[4], &h) != napi_ok) {
+        return ThrowError(env, "nativeSetSourceRect(id, x, y, w, h): bad arguments");
+    }
+#ifndef HAVE_LIBOBS
+    (void)x; (void)y; (void)w; (void)h;
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    if (item == nullptr) {
+        return CreateBool(env, false);
+    }
+    obs_source_t *src = obs_sceneitem_get_source(item);
+    const float sw = (float)obs_source_get_width(src);
+    const float sh = (float)obs_source_get_height(src);
+    if (sw <= 0.0f || sh <= 0.0f || w <= 1.0 || h <= 1.0) {
+        return CreateBool(env, false);
+    }
+    if (obs_sceneitem_get_bounds_type(item) != OBS_BOUNDS_NONE) {
+        obs_sceneitem_set_bounds_type(item, OBS_BOUNDS_NONE);
+    }
+    struct vec2 scale;
+    vec2_set(&scale, (float)w / sw, (float)h / sh); // API expects absolute
+    obs_sceneitem_set_scale(item, &scale);
+    struct vec2 pos;
+    vec2_set(&pos, x, y);
+    obs_sceneitem_set_pos(item, &pos);
+    return CreateBool(env, true);
+#endif
+}
+
+/* nativeScaleSourceBy(id, factor): uniform scale about the item origin. */
+napi_value NativeScaleSourceBy(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id;
+    double factor = 1.0;
+    if (argc < 2 || !GetStringArg(env, args[0], id) || napi_get_value_double(env, args[1], &factor) != napi_ok) {
+        return ThrowError(env, "nativeScaleSourceBy(id, factor): bad arguments");
+    }
+#ifndef HAVE_LIBOBS
+    (void)id; (void)factor;
+    return ThrowCoreNotLinked(env);
+#else
+    if (factor <= 0.0) {
+        return CreateBool(env, false);
+    }
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    if (item == nullptr) {
+        return CreateBool(env, false);
+    }
+    /* Bounds mode (the 缩放至全屏/拉伸 presets) NORMALISES the item scale
+     * away — calculate_bounds_data derives the effective scale purely from
+     * bounds/source, so set_scale under SCALE_INNER changes nothing on
+     * screen (user report 10-14: pinch works on the camera but not on
+     * 捕获屏幕). Bake the current RENDERED size into the scale and drop the
+     * bounds on the first pinch — the desktop "No scaling" transition. The
+     * content rect comes from the DRAW transform (box_transform reports the
+     * bounds box, wider than the letterboxed content). */
+    if (obs_sceneitem_get_bounds_type(item) != OBS_BOUNDS_NONE) {
+        obs_source_t *src = obs_sceneitem_get_source(item);
+        const float sw = (float)obs_source_get_width(src);
+        const float sh = (float)obs_source_get_height(src);
+        struct matrix4 dm;
+        obs_sceneitem_get_draw_transform(item, &dm);
+        float minX = 1e30f, minY = 1e30f, maxX = -1e30f, maxY = -1e30f;
+        const float px[4] = {0.0f, sw, 0.0f, sw};
+        const float py[4] = {0.0f, 0.0f, sh, sh};
+        for (int i = 0; i < 4; i++) {
+            const float ox = px[i] * dm.x.x + py[i] * dm.y.x + dm.t.x;
+            const float oy = px[i] * dm.x.y + py[i] * dm.y.y + dm.t.y;
+            if (ox < minX) minX = ox;
+            if (ox > maxX) maxX = ox;
+            if (oy < minY) minY = oy;
+            if (oy > maxY) maxY = oy;
+        }
+        if (sw > 0.0f && sh > 0.0f && maxX > minX && maxY > minY) {
+            struct vec2 baked;
+            vec2_set(&baked, (maxX - minX) * factor / sw, (maxY - minY) * factor / sh);
+            struct vec2 pos;
+            vec2_set(&pos, minX, minY); // keep the on-screen corner
+            obs_sceneitem_set_bounds_type(item, OBS_BOUNDS_NONE);
+            obs_sceneitem_set_scale(item, &baked); // API expects absolute
+            obs_sceneitem_set_pos(item, &pos);
+            return CreateBool(env, true);
+        }
+    }
+    struct vec2 cur;
+    obs_sceneitem_get_scale(item, &cur);
+    struct vec2 next;
+    vec2_set(&next, cur.x * factor, cur.y * factor);
+    obs_sceneitem_set_scale(item, &next);
+    return CreateBool(env, true);
+#endif
+}
+
+/* ---- Transform / duplicate / rename (source context menu, #49) -------- */
+
+/* nativeSetSourceTransform(id, rotDeg, flipX, flipY): rotate about the item
+ * origin and mirror either axis, matching the desktop right-click entries
+ * "Transform > Rotate 90° / Flip horizontal / Flip vertical". flipX/flipY
+ * are absolute (not toggles) so the ArkTS layer owns the current state. */
+napi_value NativeSetSourceTransform(napi_env env, napi_callback_info info)
+{
+    size_t argc = 4;
+    napi_value args[4] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id;
+    double rotDeg = 0.0;
+    bool flipX = false, flipY = false;
+    if (argc < 4 || !GetStringArg(env, args[0], id) ||
+        napi_get_value_double(env, args[1], &rotDeg) != napi_ok ||
+        napi_get_value_bool(env, args[2], &flipX) != napi_ok ||
+        napi_get_value_bool(env, args[3], &flipY) != napi_ok) {
+        return ThrowError(env, "nativeSetSourceTransform(id, rot, flipX, flipY): bad arguments");
+    }
+#ifndef HAVE_LIBOBS
+    (void)id; (void)rotDeg; (void)flipX; (void)flipY;
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    if (item == nullptr) {
+        return CreateBool(env, false);
+    }
+    obs_sceneitem_set_rot(item, (float)rotDeg);
+    struct vec2 scale;
+    obs_sceneitem_get_scale(item, &scale);
+    scale.x = flipX ? -fabsf(scale.x) : fabsf(scale.x);
+    scale.y = flipY ? -fabsf(scale.y) : fabsf(scale.y);
+    obs_sceneitem_set_scale(item, &scale);
+    return CreateBool(env, true);
+#endif
+}
+
+/* nativeSetSourceBoundsFit(id, mode): 'fit'/'stretch'/'none' — the
+ * "Scale to fit window / Stretch to window / No scaling" bounds presets.
+ * fit uses SCALE_INNER against the full canvas, centred. */
+napi_value NativeSetSourceBoundsFit(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id, mode;
+    if (argc < 2 || !GetStringArg(env, args[0], id) || !GetStringArg(env, args[1], mode)) {
+        return ThrowError(env, "nativeSetSourceBoundsFit(id, mode): bad arguments");
+    }
+#ifndef HAVE_LIBOBS
+    (void)id; (void)mode;
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    if (item == nullptr) {
+        return CreateBool(env, false);
+    }
+    enum obs_bounds_type type;
+    if (mode == "stretch") {
+        type = OBS_BOUNDS_STRETCH;
+    } else if (mode == "none") {
+        type = OBS_BOUNDS_NONE;
+    } else {
+        type = OBS_BOUNDS_SCALE_INNER;
+    }
+    struct obs_video_info ovi;
+    if (!obs_get_video_info(&ovi)) {
+        return CreateBool(env, false);
+    }
+    struct vec2 bounds;
+    vec2_set(&bounds, (float)ovi.base_width, (float)ovi.base_height);
+    obs_sceneitem_set_bounds_type(item, type);
+    obs_sceneitem_set_bounds_alignment(item, OBS_ALIGN_CENTER);
+    obs_sceneitem_set_bounds(item, &bounds);
+    return CreateBool(env, true);
+#endif
+}
+
+/* nativeDuplicateSource(id) -> new item id ('' on failure). Adds a second
+ * scene item referencing the SAME source — the desktop frontend's
+ * "Copy (reference)" behaviour (obs_sceneitem_duplicate does not exist in
+ * this libobs; obs_scene_add with the shared source is its reference form). */
+napi_value NativeDuplicateSource(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id;
+    if (argc < 1 || !GetStringArg(env, args[0], id)) {
+        return ThrowError(env, "nativeDuplicateSource(id): argument must be a string");
+    }
+#ifndef HAVE_LIBOBS
+    (void)id;
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    if (item == nullptr) {
+        return CreateString(env, "");
+    }
+    obs_scene_t *parent = obs_sceneitem_get_scene(item);
+    obs_source_t *source = obs_sceneitem_get_source(item);
+    obs_sceneitem_t *copy = obs_scene_add(parent, source);
+    if (copy == nullptr) {
+        return CreateString(env, "");
+    }
+    /* Carry geometry over so the duplicate lands on top of the original
+     * (visibly "the same thing twice") instead of the scene default. */
+    struct vec2 pos, scale;
+    obs_sceneitem_get_pos(item, &pos);
+    obs_sceneitem_get_scale(item, &scale);
+    obs_sceneitem_set_pos(copy, &pos);
+    obs_sceneitem_set_scale(copy, &scale);
+    obs_sceneitem_set_rot(copy, obs_sceneitem_get_rot(item));
+    return CreateString(env, std::to_string(obs_sceneitem_get_id(copy)));
+#endif
+}
+
+/* nativeRenameSource(id, name): rename the underlying source; the scene
+ * list refreshes from obs_source_get_name so the UI follows automatically. */
+napi_value NativeRenameSource(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id, name;
+    if (argc < 2 || !GetStringArg(env, args[0], id) || !GetStringArg(env, args[1], name)) {
+        return ThrowError(env, "nativeRenameSource(id, name): bad arguments");
+    }
+#ifndef HAVE_LIBOBS
+    (void)id; (void)name;
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    obs_source_t *src = item != nullptr ? obs_sceneitem_get_source(item) : nullptr;
+    if (src == nullptr || name.empty()) {
+        return CreateBool(env, false);
+    }
+    obs_source_set_name(src, name.c_str());
+    return CreateBool(env, true);
+#endif
+}
+
+/* nativeGetSourceTransform(id) -> JSON '{"rot":deg,"flipX":bool,"flipY":bool}'
+ * (rot normalised to 0..360). The menu's flip/rotate entries are toggles,
+ * so the ArkTS layer needs the current absolute state to compute the next
+ * one — bounds' w/h sign cannot carry rotation, and a fresh restore from
+ * scene.json would otherwise desync the local mirror. */
+napi_value NativeGetSourceTransform(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id;
+    if (argc < 1 || !GetStringArg(env, args[0], id)) {
+        return ThrowError(env, "nativeGetSourceTransform(id): argument must be a string");
+    }
+#ifndef HAVE_LIBOBS
+    (void)id;
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    if (item == nullptr) {
+        return CreateString(env, "");
+    }
+    float rot = obs_sceneitem_get_rot(item);
+    while (rot < 0.0f) {
+        rot += 360.0f;
+    }
+    while (rot >= 360.0f) {
+        rot -= 360.0f;
+    }
+    struct vec2 scale;
+    obs_sceneitem_get_scale(item, &scale);
+    char buf[96];
+    snprintf(buf, sizeof(buf), "{\"rot\":%.1f,\"flipX\":%s,\"flipY\":%s}", rot, scale.x < 0.0f ? "true" : "false",
+             scale.y < 0.0f ? "true" : "false");
+    return CreateString(env, buf);
+#endif
+}
+
+/* nativeSetSourceSize(id, w, h): absolute size in canvas px. Computes the
+ * item scale from the source's base dimensions (scale = target / base),
+ * preserving the sign of the current scale so a mirrored item stays
+ * mirrored. w or h <= 0 keeps that axis unchanged. */
+napi_value NativeSetSourceSize(napi_env env, napi_callback_info info)
+{
+    size_t argc = 3;
+    napi_value args[3] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id;
+    double w = 0, h = 0;
+    if (argc < 3 || !GetStringArg(env, args[0], id) || napi_get_value_double(env, args[1], &w) != napi_ok ||
+        napi_get_value_double(env, args[2], &h) != napi_ok) {
+        return ThrowError(env, "nativeSetSourceSize(id, w, h): bad arguments");
+    }
+#ifndef HAVE_LIBOBS
+    (void)id; (void)w; (void)h;
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    if (item == nullptr) {
+        return CreateBool(env, false);
+    }
+    obs_source_t *src = obs_sceneitem_get_source(item);
+    const uint32_t baseW = obs_source_get_width(src);
+    const uint32_t baseH = obs_source_get_height(src);
+    if (baseW == 0 || baseH == 0) {
+        return CreateBool(env, false);
+    }
+    struct vec2 cur;
+    obs_sceneitem_get_scale(item, &cur);
+    struct vec2 next = cur;
+    if (w > 0) {
+        const float sign = cur.x < 0.0f ? -1.0f : 1.0f;
+        next.x = sign * (float)(w / (double)baseW);
+    }
+    if (h > 0) {
+        const float sign = cur.y < 0.0f ? -1.0f : 1.0f;
+        next.y = sign * (float)(h / (double)baseH);
+    }
+    obs_sceneitem_set_scale(item, &next);
+    return CreateBool(env, true);
+#endif
+}
+
+/* ---- Source lock + z-order (desktop source-row icons parity) --------- */
+
+/* nativeSetSourceLocked(id, locked) -> bool. A locked item ignores canvas
+ * drag/pinch in the ArkUI gesture layer (PreviewInteractor checks the flag). */
+napi_value NativeSetSourceLocked(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id;
+    bool locked = false;
+    if (argc < 2 || !GetStringArg(env, args[0], id) || napi_get_value_bool(env, args[1], &locked) != napi_ok) {
+        return ThrowError(env, "nativeSetSourceLocked(id, locked): bad arguments");
+    }
+#ifndef HAVE_LIBOBS
+    (void)id; (void)locked;
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    if (item == nullptr) {
+        return CreateBool(env, false);
+    }
+    return CreateBool(env, obs_sceneitem_set_locked(item, locked));
+#endif
+}
+
+/* nativeSetSourceOrder(id, dir): dir is 'up' | 'down' | 'top' | 'bottom'.
+ * Moves the item in the scene's draw order (later = drawn on top). */
+napi_value NativeSetSourceOrder(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id, dir;
+    if (argc < 2 || !GetStringArg(env, args[0], id) || !GetStringArg(env, args[1], dir)) {
+        return ThrowError(env, "nativeSetSourceOrder(id, dir): bad arguments");
+    }
+#ifndef HAVE_LIBOBS
+    (void)id; (void)dir;
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    if (item == nullptr) {
+        return CreateBool(env, false);
+    }
+    enum obs_order_movement movement;
+    if (dir == "up") {
+        movement = OBS_ORDER_MOVE_UP;
+    } else if (dir == "down") {
+        movement = OBS_ORDER_MOVE_DOWN;
+    } else if (dir == "top") {
+        movement = OBS_ORDER_MOVE_TOP;
+    } else if (dir == "bottom") {
+        movement = OBS_ORDER_MOVE_BOTTOM;
+    } else {
+        return CreateBool(env, false);
+    }
+    obs_sceneitem_set_order(item, movement);
+    return CreateBool(env, true);
+#endif
+}
+
+/* ---- Advanced audio props (desktop 高级音频属性 parity) -------------- */
+
+/* nativeGetSourceAudioProps(id) -> JSON '{"sync":ms,"monitor":0|1|2}'
+ * ('' when the item is gone). monitor maps the obs_monitoring_type enum:
+ * 0=none, 1=monitor-only, 2=monitor-and-output. */
+napi_value NativeGetSourceAudioProps(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id;
+    if (argc < 1 || !GetStringArg(env, args[0], id)) {
+        return ThrowError(env, "nativeGetSourceAudioProps(id): argument must be a string");
+    }
+#ifndef HAVE_LIBOBS
+    (void)id;
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    obs_source_t *src = item != nullptr ? obs_sceneitem_get_source(item) : nullptr;
+    if (src == nullptr) {
+        return CreateString(env, "");
+    }
+    char buf[96];
+    snprintf(buf, sizeof(buf), "{\"sync\":%lld,\"monitor\":%d}", (long long)obs_source_get_sync_offset(src),
+             (int)obs_source_get_monitoring_type(src));
+    return CreateString(env, buf);
+#endif
+}
+
+/* nativeSetSourceAudioProps(id, syncOffsetMs, monitoringType) -> bool. */
+napi_value NativeSetSourceAudioProps(napi_env env, napi_callback_info info)
+{
+    size_t argc = 3;
+    napi_value args[3] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id;
+    double syncMs = 0;
+    int32_t monitor = 0;
+    if (argc < 3 || !GetStringArg(env, args[0], id) || napi_get_value_double(env, args[1], &syncMs) != napi_ok ||
+        napi_get_value_int32(env, args[2], &monitor) != napi_ok) {
+        return ThrowError(env, "nativeSetSourceAudioProps(id, syncMs, monitor): bad arguments");
+    }
+#ifndef HAVE_LIBOBS
+    (void)id; (void)syncMs; (void)monitor;
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    obs_source_t *src = item != nullptr ? obs_sceneitem_get_source(item) : nullptr;
+    if (src == nullptr) {
+        return CreateBool(env, false);
+    }
+    obs_source_set_sync_offset(src, (int64_t)syncMs);
+    if (monitor >= OBS_MONITORING_TYPE_NONE && monitor <= OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT) {
+        obs_source_set_monitoring_type(src, (enum obs_monitoring_type)monitor);
+    }
+    return CreateBool(env, true);
+#endif
+}
+
+/* ---- Media source transport (ffmpeg_source playback controls) -------- */
+
+/* nativeMediaControl(id, action) -> bool. action is one of
+ * "play" | "pause" | "restart" | "stop". Only sources whose output flags
+ * carry OBS_SOURCE_CONTROLLABLE_MEDIA respond; everything else is a no-op
+ * that still returns true (the panel hides itself for non-media sources). */
+napi_value NativeMediaControl(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id, action;
+    if (argc < 2 || !GetStringArg(env, args[0], id) || !GetStringArg(env, args[1], action)) {
+        return ThrowError(env, "nativeMediaControl(id, action): bad arguments");
+    }
+#ifndef HAVE_LIBOBS
+    (void)id; (void)action;
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    obs_source_t *src = item != nullptr ? obs_sceneitem_get_source(item) : nullptr;
+    if (src == nullptr) {
+        return CreateBool(env, false);
+    }
+    if (action == "play") {
+        obs_source_media_play_pause(src, false);
+    } else if (action == "pause") {
+        obs_source_media_play_pause(src, true);
+    } else if (action == "restart") {
+        obs_source_media_restart(src);
+    } else if (action == "stop") {
+        obs_source_media_stop(src);
+    } else {
+        return CreateBool(env, false);
+    }
+    return CreateBool(env, true);
+#endif
+}
+
+/* nativeGetMediaState(id) -> JSON
+ * '{"time":ms,"duration":ms,"state":"playing|paused|stopped|ended|error|none"}'
+ * ('' when the item is gone). The panel polls this on its own timer to move
+ * the seek slider; duration 0 means "not a media source / not loaded yet". */
+napi_value NativeGetMediaState(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id;
+    if (argc < 1 || !GetStringArg(env, args[0], id)) {
+        return ThrowError(env, "nativeGetMediaState(id): argument must be a string");
+    }
+#ifndef HAVE_LIBOBS
+    (void)id;
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    obs_source_t *src = item != nullptr ? obs_sceneitem_get_source(item) : nullptr;
+    if (src == nullptr) {
+        return CreateString(env, "");
+    }
+    const int64_t duration = obs_source_media_get_duration(src);
+    const int64_t time = obs_source_media_get_time(src);
+    const char *state = "none";
+    switch (obs_source_media_get_state(src)) {
+    case OBS_MEDIA_STATE_PLAYING:
+        state = "playing";
+        break;
+    case OBS_MEDIA_STATE_PAUSED:
+        state = "paused";
+        break;
+    case OBS_MEDIA_STATE_STOPPED:
+        state = "stopped";
+        break;
+    case OBS_MEDIA_STATE_ENDED:
+        state = "ended";
+        break;
+    case OBS_MEDIA_STATE_ERROR:
+        state = "error";
+        break;
+    default:
+        state = "none";
+        break;
+    }
+    char buf[160];
+    snprintf(buf, sizeof(buf), "{\"time\":%lld,\"duration\":%lld,\"state\":\"%s\"}", (long long)time,
+             (long long)duration, state);
+    return CreateString(env, buf);
+#endif
+}
+
+/* nativeMediaSeek(id, ms) -> bool. Absolute seek; the slider commits on
+ * release so a drag does not spam seeks. */
+napi_value NativeMediaSeek(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id;
+    double ms = 0;
+    if (argc < 2 || !GetStringArg(env, args[0], id) || napi_get_value_double(env, args[1], &ms) != napi_ok) {
+        return ThrowError(env, "nativeMediaSeek(id, ms): bad arguments");
+    }
+#ifndef HAVE_LIBOBS
+    (void)id; (void)ms;
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    obs_source_t *src = item != nullptr ? obs_sceneitem_get_source(item) : nullptr;
+    if (src == nullptr) {
+        return CreateBool(env, false);
+    }
+    obs_source_media_set_time(src, (int64_t)ms);
+    return CreateBool(env, true);
+#endif
+}
+
+/* ---- Generic property schema (desktop OBS property renderer parity) --- */
+
+#ifdef HAVE_LIBOBS
+/* Append s as a JSON string literal (with quotes). */
+static void AppendJsonString(std::string &out, const char *s)
+{
+    out += '"';
+    for (; s != nullptr && *s != '\0'; s++) {
+        const unsigned char c = (unsigned char)*s;
+        if (c == '"' || c == '\\') {
+            out += '\\';
+            out += (char)c;
+        } else if (c == '\n') {
+            out += "\\n";
+        } else if (c == '\r') {
+            out += "\\r";
+        } else if (c == '\t') {
+            out += "\\t";
+        } else if (c < 0x20) {
+            char buf[8];
+            snprintf(buf, sizeof(buf), "\\u%04x", c);
+            out += buf;
+        } else {
+            out += (char)c;
+        }
+    }
+    out += '"';
+}
+
+static void AppendComma(std::string &out)
+{
+    if (out.size() > 1) {
+        out += ',';
+    }
+}
+
+/* Walk one obs_properties_t, emitting a JSON descriptor per supported
+ * property. obs_property_name() is the SETTINGS KEY; the human label is
+ * obs_property_description() (verified against obs-properties.c new_prop).
+ * GROUPs are flattened recursively; BUTTON/FONT/EDITABLE_LIST/FRAME_RATE
+ * are skipped (no meaningful touch representation yet). */
+static void CollectPropertySchema(obs_properties_t *props, obs_data_t *settings, std::string &out)
+{
+    for (obs_property_t *p = obs_properties_first(props); p != nullptr; obs_property_next(&p)) {
+        if (!obs_property_visible(p)) {
+            continue;
+        }
+        const char *key = obs_property_name(p);
+        if (key == nullptr || key[0] == '\0') {
+            continue;
+        }
+        const enum obs_property_type type = obs_property_get_type(p);
+        if (type == OBS_PROPERTY_GROUP) {
+            obs_properties_t *sub = obs_property_group_content(p);
+            if (sub != nullptr) {
+                CollectPropertySchema(sub, settings, out);
+            }
+            continue;
+        }
+        if (type == OBS_PROPERTY_INVALID || type == OBS_PROPERTY_BUTTON || type == OBS_PROPERTY_FONT ||
+            type == OBS_PROPERTY_EDITABLE_LIST || type == OBS_PROPERTY_FRAME_RATE) {
+            continue;
+        }
+
+        AppendComma(out);
+        out += "{\"key\":";
+        AppendJsonString(out, key);
+        out += ",\"label\":";
+        const char *label = obs_property_description(p);
+        AppendJsonString(out, label != nullptr && label[0] != '\0' ? label : key);
+        char buf[256];
+        switch (type) {
+        case OBS_PROPERTY_BOOL:
+            out += ",\"type\":\"bool\",\"value\":";
+            out += obs_data_get_bool(settings, key) ? "true" : "false";
+            break;
+        case OBS_PROPERTY_INT:
+            out += ",\"type\":\"int\"";
+            snprintf(buf, sizeof(buf), ",\"min\":%d,\"max\":%d,\"step\":%d,\"value\":%lld", obs_property_int_min(p),
+                     obs_property_int_max(p), obs_property_int_step(p), obs_data_get_int(settings, key));
+            out += buf;
+            break;
+        case OBS_PROPERTY_FLOAT:
+            out += ",\"type\":\"float\"";
+            snprintf(buf, sizeof(buf), ",\"min\":%g,\"max\":%g,\"step\":%g,\"value\":%g", obs_property_float_min(p),
+                     obs_property_float_max(p), obs_property_float_step(p), obs_data_get_double(settings, key));
+            out += buf;
+            break;
+        case OBS_PROPERTY_TEXT:
+        case OBS_PROPERTY_PATH:
+            out += ",\"type\":\"text\",\"value\":";
+            AppendJsonString(out, obs_data_get_string(settings, key));
+            break;
+        case OBS_PROPERTY_COLOR:
+        case OBS_PROPERTY_COLOR_ALPHA:
+            out += ",\"type\":\"color\"";
+            snprintf(buf, sizeof(buf), ",\"value\":%u", (unsigned)obs_data_get_int(settings, key));
+            out += buf;
+            break;
+        case OBS_PROPERTY_LIST: {
+            const enum obs_combo_format fmt = obs_property_list_format(p);
+            out += ",\"type\":\"list\",\"format\":";
+            AppendJsonString(out, fmt == OBS_COMBO_FORMAT_INT ? "int" : (fmt == OBS_COMBO_FORMAT_FLOAT ? "float" :
+                                                                                                                                       "string"));
+            out += ",\"options\":[";
+            const size_t count = obs_property_list_item_count(p);
+            for (size_t i = 0; i < count; i++) {
+                if (i > 0) {
+                    out += ',';
+                }
+                out += "{\"name\":";
+                AppendJsonString(out, obs_property_list_item_name(p, i));
+                out += ",\"value\":";
+                if (fmt == OBS_COMBO_FORMAT_INT) {
+                    snprintf(buf, sizeof(buf), "%lld", obs_property_list_item_int(p, i));
+                    out += buf;
+                } else if (fmt == OBS_COMBO_FORMAT_FLOAT) {
+                    snprintf(buf, sizeof(buf), "%g", obs_property_list_item_float(p, i));
+                    out += buf;
+                } else {
+                    AppendJsonString(out, obs_property_list_item_string(p, i));
+                }
+                out += '}';
+            }
+            out += "],\"value\":";
+            if (fmt == OBS_COMBO_FORMAT_INT) {
+                snprintf(buf, sizeof(buf), "%lld", obs_data_get_int(settings, key));
+                out += buf;
+            } else if (fmt == OBS_COMBO_FORMAT_FLOAT) {
+                snprintf(buf, sizeof(buf), "%g", obs_data_get_double(settings, key));
+                out += buf;
+            } else {
+                AppendJsonString(out, obs_data_get_string(settings, key));
+            }
+            break;
+        }
+        default:
+            break;
+        }
+        const char *suffix = type == OBS_PROPERTY_INT ? obs_property_int_suffix(p) :
+                         (type == OBS_PROPERTY_FLOAT ? obs_property_float_suffix(p) : nullptr);
+        if (suffix != nullptr && suffix[0] != '\0') {
+            out += ",\"suffix\":";
+            AppendJsonString(out, suffix);
+        }
+        out += '}';
+    }
+}
+#endif
+
+/* nativeGetPropertySchema(itemId, filterName) -> JSON array of property
+ * descriptors ('[]' unavailable / not controllable). filterName '' renders
+ * the source's own properties; otherwise the named filter's. The ArkTS
+ * generic renderer turns this into switches/sliders/fields live. */
+napi_value NativeGetPropertySchema(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id, filterName;
+    if (argc < 1 || !GetStringArg(env, args[0], id)) {
+        return ThrowError(env, "nativeGetPropertySchema(itemId, filterName?): bad arguments");
+    }
+    if (argc >= 2) {
+        GetStringArg(env, args[1], filterName);
+    }
+#ifndef HAVE_LIBOBS
+    (void)id; (void)filterName;
+    return CreateString(env, "[]");
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    obs_source_t *source = item != nullptr ? obs_sceneitem_get_source(item) : nullptr;
+    if (source == nullptr) {
+        return CreateString(env, "[]");
+    }
+    obs_source_t *filter = nullptr;
+    if (!filterName.empty()) {
+        filter = obs_source_get_filter_by_name(source, filterName.c_str());
+        if (filter == nullptr) {
+            return CreateString(env, "[]");
+        }
+        source = filter;
+    }
+    obs_properties_t *props = obs_source_properties(source);
+    obs_data_t *settings = obs_source_get_settings(source);
+    std::string out = "[";
+    if (props != nullptr) {
+        CollectPropertySchema(props, settings, out);
+    }
+    out += ']';
+    if (props != nullptr) {
+        obs_properties_destroy(props);
+    }
+    obs_data_release(settings);
+    if (filter != nullptr) {
+        obs_source_release(filter);
+    }
+    return CreateString(env, out);
+#endif
+}
+
+/* nativeSetFilterSettings(itemId, filterName, settingsJson) -> bool. Same
+ * merge-and-update semantics as nativeSetSourceSettings, for filters. */
+napi_value NativeSetFilterSettings(napi_env env, napi_callback_info info)
+{
+    size_t argc = 3;
+    napi_value args[3] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id, filterName, patchJson;
+    if (argc < 3 || !GetStringArg(env, args[0], id) || !GetStringArg(env, args[1], filterName) ||
+        !GetStringArg(env, args[2], patchJson)) {
+        return ThrowError(env, "nativeSetFilterSettings(itemId, filterName, settingsJson): bad arguments");
+    }
+#ifndef HAVE_LIBOBS
+    (void)id; (void)filterName; (void)patchJson;
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    obs_source_t *source = item != nullptr ? obs_sceneitem_get_source(item) : nullptr;
+    if (source == nullptr) {
+        return CreateBool(env, false);
+    }
+    obs_source_t *filter = obs_source_get_filter_by_name(source, filterName.c_str());
+    if (filter == nullptr) {
+        return CreateBool(env, false);
+    }
+    obs_data_t *patch = obs_data_create_from_json(patchJson.c_str());
+    if (patch == nullptr) {
+        obs_source_release(filter);
+        return ThrowError(env, "nativeSetFilterSettings: settingsJson is not valid JSON");
+    }
+    obs_data_t *current = obs_source_get_settings(filter);
+    obs_data_apply(current, patch);
+    obs_source_update(filter, current);
+    obs_data_release(patch);
+    obs_data_release(current);
+    obs_source_release(filter);
+    return CreateBool(env, true);
+#endif
+}
+
+/* ---- Transition type (studio-mode 转场动画面板) ---------------------- */
+
+/* Candidate transition ids from obs-transitions, in the desktop panel's
+ * display order. Probed against the registered source types so a build that
+ * ships fewer transition plugins simply offers fewer rows (and an unknown id
+ * is rejected by setTransitionType). cut_transition is excluded: "cut" is
+ * duration 0 in this frontend's model, not a transition source. */
+static const char *const kTransitionCandidates[] = {
+    "fade_transition", "slide_transition", "swipe_transition", "fade_to_color_transition", "wipe_transition",
+};
+
+/* nativeGetTransitionTypes() -> JSON array [{"id","name"}...] of the
+ * transition types actually registered, plus the current one first if it is
+ * somehow outside the candidate list. */
+napi_value NativeGetTransitionTypes(napi_env env, napi_callback_info /*info*/)
+{
+#ifndef HAVE_LIBOBS
+    return CreateString(env, "[]");
+#else
+    std::string out = "[";
+    for (size_t i = 0; i < sizeof(kTransitionCandidates) / sizeof(kTransitionCandidates[0]); i++) {
+        const char *tid = kTransitionCandidates[i];
+        const char *display = obs_source_get_display_name(tid);
+        if (display == nullptr) {
+            continue; /* plugin not loaded in this build */
+        }
+        if (out.size() > 1) {
+            out += ',';
+        }
+        out += "{\"id\":\"";
+        out += tid;
+        out += "\",\"name\":\"";
+        /* Display names are plain ASCII locale strings; escape double
+         * quotes defensively. */
+        for (const char *p = display; *p != '\0'; p++) {
+            if (*p == '"' || *p == '\\') {
+                out += '\\';
+            }
+            out += *p;
+        }
+        out += "\"}";
+    }
+    out += ']';
+    return CreateString(env, out);
+#endif
+}
+
+/* nativeSetTransitionType(id) -> bool. Swaps the program-channel transition
+ * shell to another transition type. The channel-0 ownership invariant (after
+ * the shell exists, channel 0 always owns it) is preserved by rebuilding
+ * around the currently visible source: seed the new shell with the source
+ * the old shell shows, bind it to channel 0, then drop the old shell. */
+napi_value NativeSetTransitionType(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id;
+    if (argc < 1 || !GetStringArg(env, args[0], id)) {
+        return ThrowError(env, "nativeSetTransitionType(id): argument must be a string");
+    }
+#ifndef HAVE_LIBOBS
+    (void)id;
+    return ThrowCoreNotLinked(env);
+#else
+    if (id.empty() || obs_source_get_display_name(id.c_str()) == nullptr) {
+        return CreateBool(env, false);
+    }
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    if (g_programTransitionId == id) {
+        return CreateBool(env, true);
+    }
+
+    if (g_programTransition != nullptr) {
+        /* Rebuild the live shell: hand the visible source to a fresh shell
+         * of the new type before releasing the old one, so channel 0 never
+         * goes ownerless mid-swap. */
+        obs_source_t *visible = obs_transition_get_active_source(g_programTransition);
+        if (visible == nullptr || visible == g_programTransition) {
+            if (visible != nullptr) {
+                obs_source_release(visible); /* never re-parent the shell */
+            }
+            visible = obs_transition_get_source(g_programTransition, OBS_TRANSITION_SOURCE_A);
+        }
+        obs_source_t *fresh = obs_source_create_private(id.c_str(), "harmony_scene_transition", nullptr);
+        if (fresh == nullptr) {
+            obs_source_release(visible);
+            return CreateBool(env, false);
+        }
+        obs_transition_set(fresh, visible);
+        obs_source_release(visible);
+        obs_set_output_source(0, fresh);
+        obs_transition_clear(g_programTransition);
+        obs_source_release(g_programTransition);
+        g_programTransition = fresh;
+    }
+    g_programTransitionId = id;
+    return CreateBool(env, true);
 #endif
 }
 
@@ -1126,9 +2370,11 @@ napi_value NativeSelectScene(napi_env env, napi_callback_info info)
         /* One persistent wrapper owned by us; the channel holds its own
          * reference once bound, so this create-ref stays for our lifetime
          * (released in ShutdownCore). */
-        g_programTransition = obs_source_create_private("fade_transition", "harmony_scene_transition", nullptr);
+        g_programTransition = obs_source_create_private(g_programTransitionId.c_str(), "harmony_scene_transition",
+                                                        nullptr);
         if (g_programTransition == nullptr) {
-            OH_LOG_WARN(LOG_APP, "fade_transition source unavailable, falling back to cut");
+            OH_LOG_WARN(LOG_APP, "%{public}s source unavailable, falling back to cut",
+                        g_programTransitionId.c_str());
             obs_set_output_source(0, target);
             return CreateBool(env, true);
         }
@@ -1418,9 +2664,52 @@ napi_value NativeGetAudioTracks(napi_env env, napi_callback_info /*info*/)
 {
     napi_value array = nullptr;
     napi_create_array(env, &array);
-    napi_set_element(env, array, 0, BuildTrackObject(env, g_desktopTrack));
-    napi_set_element(env, array, 1, BuildTrackObject(env, g_micTrack));
+#ifdef HAVE_LIBOBS
+    // Snapshot the registered scenes' audio sources OUTSIDE g_audioMutex
+    // (scene enumeration takes g_sceneMutex; never nest the two), then
+    // reconcile the track registry under the audio lock.
+    std::vector<obs_source_t *> snapshot;
+    {
+        std::lock_guard<std::mutex> lock(g_sceneMutex);
+        for (auto &entry : g_scenes) {
+            obs_scene_enum_items(entry.second, CollectSceneAudioRef, &snapshot);
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_audioMutex);
+        for (auto &entry : g_audioTracks) {
+            entry.second->seen = false;
+        }
+        for (obs_source_t *src : snapshot) {
+            RegisterAudioSource(src);
+        }
+        PruneAudioTracksLocked();
+        uint32_t i = 0;
+        for (auto &entry : g_audioTracks) {
+            napi_set_element(env, array, i++, BuildTrackObject(env, entry.second));
+        }
+    }
+    for (obs_source_t *src : snapshot) {
+        obs_source_release(src);
+    }
+#endif
     return array;
+}
+
+// Resolve a mixer track id (source uuid) to a TEMPORARY strong ref. The
+// caller owns the returned reference and must obs_source_release() it.
+static obs_source_t *LookupTrackSource(const std::string &uuid)
+{
+#ifdef HAVE_LIBOBS
+    std::lock_guard<std::mutex> lock(g_audioMutex);
+    auto it = g_audioTracks.find(uuid);
+    if (it != g_audioTracks.end()) {
+        return LockTrackSource(it->second);
+    }
+#else
+    (void)uuid;
+#endif
+    return nullptr;
 }
 
 napi_value NativeSetMute(napi_env env, napi_callback_info info)
@@ -1434,22 +2723,19 @@ napi_value NativeSetMute(napi_env env, napi_callback_info info)
         napi_get_value_bool(env, args[1], &muted) != napi_ok) {
         return ThrowError(env, "nativeSetMute(trackId, muted): bad arguments");
     }
-    AudioTrack *track = nullptr;
-    if (trackId == TRACK_DESKTOP_ID) {
-        track = &g_desktopTrack;
-    } else if (trackId == TRACK_MIC_ID) {
-        track = &g_micTrack;
-    } else {
+#ifdef HAVE_LIBOBS
+    obs_source_t *source = LookupTrackSource(trackId);
+    if (source == nullptr) {
         return ThrowError(env, "nativeSetMute: unknown track id");
     }
-    track->muted.store(muted);
-#ifdef HAVE_LIBOBS
-    // Under the linked core the mixer also drives the channel-0 program audio
-    // via libobs (obs_source_set_muted on the capture source feeding the
-    // mix). The gain/mute above already silences what the meters show and
-    // what will be fed to the audio pipeline from OnAudioReadData.
-#endif
+    // The mixer IS the program-audio control now: muting the source mutes it
+    // in preview, recording and streaming alike — desktop OBS semantics.
+    obs_source_set_muted(source, muted);
+    obs_source_release(source); // LookupTrackSource hands us a temp ref
     return CreateBool(env, true);
+#else
+    return ThrowCoreNotLinked(env);
+#endif
 }
 
 napi_value NativeSetVolume(napi_env env, napi_callback_info info)
@@ -1468,32 +2754,47 @@ napi_value NativeSetVolume(napi_env env, napi_callback_info info)
     } else if (volume > 1.0) {
         volume = 1.0;
     }
-    AudioTrack *track = nullptr;
-    if (trackId == TRACK_DESKTOP_ID) {
-        track = &g_desktopTrack;
-    } else if (trackId == TRACK_MIC_ID) {
-        track = &g_micTrack;
-    } else {
+#ifdef HAVE_LIBOBS
+    obs_source_t *source = LookupTrackSource(trackId);
+    if (source == nullptr) {
         return ThrowError(env, "nativeSetVolume: unknown track id");
     }
-    track->volume.store(static_cast<float>(volume));
+    obs_source_set_volume(source, static_cast<float>(volume));
+    obs_source_release(source); // LookupTrackSource hands us a temp ref
     return CreateBool(env, true);
+#else
+    return ThrowCoreNotLinked(env);
+#endif
 }
 
 napi_value NativeGetOutputLevels(napi_env env, napi_callback_info /*info*/)
 {
     napi_value array = nullptr;
     napi_create_array(env, &array);
-    // Non-const: reading the meters consumes (resets) the accumulated values.
-    AudioTrack *tracks[2] = {&g_desktopTrack, &g_micTrack};
-    for (uint32_t i = 0; i < 2; ++i) {
+#ifdef HAVE_LIBOBS
+    // Levels are last-published obs_volmeter values, linear 0..1. When the
+    // audio thread has gone quiet (meter callbacks stop arriving), decay
+    // toward zero manually — the volmeter only fires on actual frames, so a
+    // silent source must NOT freeze its bar at the old peak.
+    static constexpr int64_t DECAY_WINDOW_NS = 300 * 1000 * 1000; // 300 ms
+    std::lock_guard<std::mutex> lock(g_audioMutex);
+    const int64_t now = os_gettime_ns();
+    uint32_t i = 0;
+    for (auto &entry : g_audioTracks) {
+        SourceTrack *track = entry.second;
         napi_value obj = nullptr;
         napi_create_object(env, &obj);
-        SetProperty(env, obj, "id", CreateString(env, tracks[i]->id));
-        SetProperty(env, obj, "peak", CreateDouble(env, tracks[i]->peak.exchange(0.0f)));
-        SetProperty(env, obj, "rms", CreateDouble(env, tracks[i]->rms.exchange(0.0f)));
-        napi_set_element(env, array, i, obj);
+        SetProperty(env, obj, "id", CreateString(env, track->uuid));
+        const bool stale = (now - track->lastNs.load()) > DECAY_WINDOW_NS;
+        if (stale) {
+            track->peak.store(0.0f);
+            track->rms.store(0.0f);
+        }
+        SetProperty(env, obj, "peak", CreateDouble(env, track->peak.load()));
+        SetProperty(env, obj, "rms", CreateDouble(env, track->rms.load()));
+        napi_set_element(env, array, i++, obj);
     }
+#endif
     return array;
 }
 
@@ -1799,6 +3100,168 @@ napi_value ThrowCoreNotLinked(napi_env env)
                       "Cross-compile libobs for HarmonyOS arm64, stage it into a prefix with "
                       "include/ + lib/libobs.so, and rebuild with "
                       "-DOBS_HARMONY_PREFIX=<prefix>.");
+}
+
+/**
+ * nativeGetSourceSettings(itemId) -> JSON string of the source's settings
+ * (or '' when the item is gone). The WebFeed registry rebuilds itself from
+ * this after a scene reload: ArkTS learns each harmony_web_source item's url
+ * and viewport straight from libobs, which is their single source of truth.
+ */
+napi_value NativeGetSourceSettings(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id;
+    if (argc < 1 || !GetStringArg(env, args[0], id)) {
+        return ThrowError(env, "nativeGetSourceSettings(id): argument must be a string");
+    }
+#ifndef HAVE_LIBOBS
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    obs_source_t *src = item != nullptr ? obs_sceneitem_get_source(item) : nullptr;
+    if (src == nullptr) {
+        return CreateString(env, "");
+    }
+    obs_data_t *settings = obs_source_get_settings(src);
+    const char *json = settings != nullptr ? obs_data_get_json(settings) : nullptr;
+    std::string out = json != nullptr ? json : "";
+    if (settings != nullptr) {
+        obs_data_release(settings);
+    }
+    return CreateString(env, out);
+#endif
+}
+
+/**
+ * nativeSetSourceSettings(itemId, settingsJson) -> bool
+ *
+ * Applies a settings PATCH to an existing source: the current settings are
+ * read, the patch's keys are merged over them (obs_data_apply, key by key —
+ * keys the patch omits keep their current value), and obs_source_update
+ * pushes the result through the plugin's update() callback, which owns all
+ * restart decisions (camera device switch, window canvas pin, ...). This is
+ * the write-back channel of the per-source ArkTS settings panel.
+ */
+napi_value NativeSetSourceSettings(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id;
+    std::string patch_json;
+    if (argc < 2 || !GetStringArg(env, args[0], id) || !GetStringArg(env, args[1], patch_json)) {
+        return ThrowError(env, "nativeSetSourceSettings(id, settingsJson): both arguments must be strings");
+    }
+#ifndef HAVE_LIBOBS
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    obs_source_t *src = item != nullptr ? obs_sceneitem_get_source(item) : nullptr;
+    if (src == nullptr) {
+        napi_value failed;
+        napi_get_boolean(env, false, &failed);
+        return failed;
+    }
+
+    obs_data_t *patch = obs_data_create_from_json(patch_json.c_str());
+    if (patch == nullptr) {
+        return ThrowError(env, "nativeSetSourceSettings: settingsJson is not valid JSON");
+    }
+
+    obs_data_t *current = obs_source_get_settings(src);
+    obs_data_apply(current, patch);
+    obs_source_update(src, current);
+    obs_data_release(patch);
+    obs_data_release(current);
+
+    napi_value ok;
+    napi_get_boolean(env, true, &ok);
+    return ok;
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// ArkWeb browser source feed (harmony-web)
+// ---------------------------------------------------------------------------
+//
+// The Web page lives in an ArkTS componentSnapshot loop (WebFeed.ets):
+// rasterise off-screen -> RGBA ArrayBuffer -> nativeWebSourceFeed(itemId, ...).
+// The harmony-web plugin only registered the source TYPE (no capture of its
+// own — ArkWeb is not a native API), so pixels enter libobs right here. This
+// is the same async-frame path harmony-remotecam proved safe to drive from a
+// non-graphics thread (there the codec callback, here the ArkTS napi thread);
+// obs_source_output_video() copies into libobs' own async buffer.
+//
+// Geometry: the plugin's get_width/get_height report the viewport stored in
+// settings (800x600 defaults, editable); the ArkTS host renders its off-screen
+// Web component at exactly that viewport and snapshots at that size, so frame
+// w/h and the stored size agree. width/height args here are validated against
+// the buffer length and used to build the frame — mismatched feeds drop.
+
+napi_value NativeWebSourceFeed(napi_env env, napi_callback_info info)
+{
+    // nativeWebSourceFeed(itemId, width, height, rgba, timestampNs) -> bool
+    size_t argc = 5;
+    napi_value args[5] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string id;
+    int64_t width = 0, height = 0;
+    if (argc < 5 || !GetStringArg(env, args[0], id) || napi_get_value_int64(env, args[1], &width) != napi_ok ||
+        napi_get_value_int64(env, args[2], &height) != napi_ok || width <= 0 || height <= 0 ||
+        width > 8192 || height > 8192) {
+        return CreateBool(env, false);
+    }
+    void *data = nullptr;
+    size_t len = 0;
+    if (napi_get_arraybuffer_info(env, args[3], &data, &len) != napi_ok || data == nullptr) {
+        return CreateBool(env, false);
+    }
+    const uint64_t wantBytes = (uint64_t)width * (uint64_t)height * 4;
+    if (len < wantBytes) {
+        return CreateBool(env, false); // short buffer: drop, never read OOB
+    }
+    uint64_t ts = 0;
+    if (napi_get_value_int64(env, args[4], (int64_t *)&ts) != napi_ok || ts == 0) {
+        ts = (uint64_t)os_gettime_ns();
+    }
+
+#ifndef HAVE_LIBOBS
+    return ThrowCoreNotLinked(env);
+#else
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    obs_sceneitem_t *item = FindSceneItemById(std::strtoll(id.c_str(), nullptr, 10));
+    if (item == nullptr) {
+        return CreateBool(env, false); // source gone (item id may be stale after scene reload)
+    }
+    obs_source_t *src = obs_sceneitem_get_source(item);
+    if (src == nullptr) {
+        return CreateBool(env, false);
+    }
+
+    // PixelMap snapshots are BGRA_8888 on OHOS; libobs' VIDEO_FORMAT_BGRA is
+    // the matching byte order (B,G,R,A), so the buffer goes through untouched
+    // — a per-pixel R/B swap in ArkTS at snapshot rate would only burn the UI
+    // thread.
+    struct obs_source_frame *frame = obs_source_frame_create(VIDEO_FORMAT_BGRA, (uint32_t)width, (uint32_t)height);
+    if (frame == nullptr) {
+        return CreateBool(env, false);
+    }
+    // linesize may be 64-byte aligned while the ArkTS buffer is tight w*4 —
+    // copy row by row, never assume they match.
+    const uint8_t *rows = static_cast<const uint8_t *>(data);
+    for (int64_t y = 0; y < height; y++)
+        memcpy(frame->data[0] + (size_t)y * frame->linesize[0], rows + (size_t)y * (size_t)(width * 4),
+               (size_t)(width * 4));
+    frame->timestamp = ts;
+    obs_source_output_video(src, frame);
+    obs_source_frame_destroy(frame);
+    return CreateBool(env, true);
+#endif
 }
 
 } // namespace obs_bridge

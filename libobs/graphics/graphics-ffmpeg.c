@@ -497,6 +497,27 @@ static void *ffmpeg_image_reformat_frame(struct ffmpeg_image *info, AVFrame *fra
 
 	data = ffmpeg_image_orient(info, data, orient);
 
+#ifdef __OHOS__
+	/* Maleoon's GLES driver rejects GL_BGRA uploads, so GS_BGRA textures
+	 * are uploaded as GL_RGBA (gl-subsystem.h __OHOS__ branch). Decoded
+	 * image data whose byte order is BGRA would therefore land with R
+	 * and B swapped on screen — device-verified 10-03: a red knock-in
+	 * photo rendered blue-violet (source pixel 192,64,87 → screen
+	 * 91,79,170). Normalise every decoded image to plain RGBA here so
+	 * the upload order is honest; convert_format() then reports GS_RGBA
+	 * and the GL_RGBA upload is correct. */
+	if (data && info->format == AV_PIX_FMT_BGRA) {
+		const size_t pixels = (size_t)info->cx * (size_t)info->cy;
+		uint8_t *p = data;
+		for (size_t i = 0; i < pixels; i++, p += 4) {
+			const uint8_t t = p[0];
+			p[0] = p[2];
+			p[2] = t;
+		}
+		info->format = AV_PIX_FMT_RGBA;
+	}
+#endif
+
 fail:
 	return data;
 }

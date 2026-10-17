@@ -5,9 +5,12 @@ import { ConnectionState, ObsAppState, ObsController } from '../model/ObsModel';
  * readout (bitrate, dropped/total frames, uptime) fed by the push-mode stats
  * callback from the native output thread (no UI polling for stats).
  *
- * Also hosts the minimal RTMP target inputs (server + key) that feed
- * nativeStartStreaming(configJson). A full settings dialog replaces this row
- * once the profile/settings system lands.
+ * The RTMP target (server + key) is NOT edited here: like the desktop OBS
+ * main window, the transport bar only carries status + the two output
+ * buttons, and the stream target lives in Settings ▸ 直播 (which also owns
+ * the history picker and the masked key field). The old always-visible
+ * server/key input row ate a full line of vertical space for a value that
+ * rarely changes (user report 10-17).
  */
 @ComponentV2
 export struct TransportBar {
@@ -52,46 +55,57 @@ export struct TransportBar {
     }
   }
 
+  /** Desktop 输出 confirmation parity: when the matching 确认 checkbox is
+   * on, the transport button asks before acting. Remote director commands
+   * (DirectorLink) bypass this by design — confirmations guard local
+   * mis-taps, not deliberate remote control. */
+  private confirmThen(message: Resource, action: () => void): void {
+    this.getUIContext().getPromptAction().showDialog({
+      title: $r('app.string.confirm_title'),
+      message: message,
+      buttons: [
+        { text: $r('app.string.confirm_cancel'), color: '#9aa0a6' },
+        { text: $r('app.string.confirm_ok'), color: '#4a9eff' }
+      ]
+    }).then((result) => {
+      if (result.index === 1) {
+        action();
+      }
+    }).catch(() => {
+      /* dialog unavailable: act without confirmation rather than blocking
+       * the transport entirely. */
+      action();
+    });
+  }
+
+  private onStreamToggle(): void {
+    const starting = !this.model.stats.streaming;
+    const need = starting ? this.model.confirmStartStream : this.model.confirmStopStream;
+    if (need) {
+      this.confirmThen(starting ? $r('app.string.confirm_start_stream') : $r('app.string.confirm_stop_stream'),
+        () => {
+          ObsController.toggleStreaming();
+        });
+    } else {
+      ObsController.toggleStreaming();
+    }
+  }
+
+  private onRecordToggle(): void {
+    const starting = !this.model.stats.recording;
+    const need = starting ? this.model.confirmStartRecord : this.model.confirmStopRecord;
+    if (need) {
+      this.confirmThen(starting ? $r('app.string.confirm_start_record') : $r('app.string.confirm_stop_record'),
+        () => {
+          ObsController.toggleRecording();
+        });
+    } else {
+      ObsController.toggleRecording();
+    }
+  }
+
   build() {
     Column({ space: 6 }) {
-      // RTMP target row -----------------------------------------------------
-      Row({ space: 8 }) {
-        Text($r('app.string.server'))
-          .fontSize(11)
-          .fontColor($r('app.color.obs_text_secondary'))
-          .width(56)
-        TextInput({ text: this.model.streamingServer, placeholder: 'rtmp://…' })
-          .fontSize(12)
-          .fontColor($r('app.color.obs_text_primary'))
-          .placeholderColor($r('app.color.obs_text_secondary'))
-          .backgroundColor('#101216')
-          .borderRadius(4)
-          .height(28)
-          .layoutWeight(2)
-          .enabled(!this.model.stats.streaming)
-          .onChange((value: string) => {
-            this.model.streamingServer = value;
-          })
-        Text($r('app.string.key'))
-          .fontSize(11)
-          .fontColor($r('app.color.obs_text_secondary'))
-          .width(60)
-          .maxLines(1)
-        TextInput({ text: this.model.streamingKey, placeholder: $r('app.string.key') })
-          .fontSize(12)
-          .fontColor($r('app.color.obs_text_primary'))
-          .placeholderColor($r('app.color.obs_text_secondary'))
-          .backgroundColor('#101216')
-          .borderRadius(4)
-          .height(28)
-          .layoutWeight(1)
-          .enabled(!this.model.stats.streaming)
-          .onChange((value: string) => {
-            this.model.streamingKey = value;
-          })
-      }
-      .width('100%')
-
       // Transport row ---------------------------------------------------------
       Row({ space: 10 }) {
         // Status indicator + readout
@@ -134,7 +148,7 @@ export struct TransportBar {
           .width(150)
           .enabled(this.model.coreReady)
           .onClick(() => {
-            ObsController.toggleStreaming();
+            this.onStreamToggle();
           })
 
         Button(this.model.stats.recording ? $r('app.string.record_stop') : $r('app.string.record_start'))
@@ -149,7 +163,7 @@ export struct TransportBar {
           .width(150)
           .enabled(this.model.coreReady)
           .onClick(() => {
-            ObsController.toggleRecording();
+            this.onRecordToggle();
           })
       }
       .width('100%')

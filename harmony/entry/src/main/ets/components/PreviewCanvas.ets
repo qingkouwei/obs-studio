@@ -1,5 +1,7 @@
 import { ObsBridge } from '../napi/obsBridge';
 import { Logger } from '../common/Logger';
+import { ObsAppState } from '../model/ObsModel';
+import { PreviewInteractor } from './PreviewInteractor';
 
 /**
  * PreviewCanvas — wraps XComponent(type: SURFACE) and hands its
@@ -23,8 +25,16 @@ import { Logger } from '../common/Logger';
 @ComponentV2
 export struct PreviewCanvas {
   @Param xcomponentId: string = 'obs-preview-canvas';
+  /** When provided, the canvas gesture overlay (select/move/pinch-scale)
+   * is mounted above the surface (W4). */
+  @Param model: ObsAppState | null = null;
+  /** Studio mode: this canvas is the SECOND display, rendering the private
+   * preview canvas (attach routes to nativeAttachStudioPreviewSurface). */
+  @Param studioPreview: boolean = false;
   private xcomponentController: XComponentController = new XComponentController();
   @Local surfaceAttached: boolean = false;
+  @Local areaW: number = 0;
+  @Local areaH: number = 0;
 
   build() {
     Stack({ alignContent: Alignment.Bottom }) {
@@ -34,11 +44,18 @@ export struct PreviewCanvas {
         libraryname: 'obs_bridge',
         controller: this.xcomponentController
       })
+        // ArkUI identity for componentSnapshot.get() (the W3-C4 program
+        // monitor grabs this canvas by id). The XComponent CONSTRUCTOR id
+        // above is the native surface-registration key — a different
+        // namespace; the snapshot API only sees .id() attributes.
+        .id(this.xcomponentId)
         .onLoad(() => {
           // The native module registered its OnSurfaceCreated callback when
           // the XComponent loaded the library; by onLoad time the NativeWindow
           // is in the registry.
-          this.surfaceAttached = ObsBridge.attachPreviewSurface(this.xcomponentId);
+          this.surfaceAttached = this.studioPreview ?
+            ObsBridge.attachStudioPreviewSurface(this.xcomponentId) :
+            ObsBridge.attachPreviewSurface(this.xcomponentId);
           if (!this.surfaceAttached) {
             Logger.warn(`preview surface '${this.xcomponentId}' not attached ` +
               '(surface not created yet, or graphics backend unavailable)');
@@ -48,7 +65,11 @@ export struct PreviewCanvas {
         })
         .onDestroy(() => {
           if (this.surfaceAttached) {
-            ObsBridge.detachPreviewSurface();
+            if (this.studioPreview) {
+              ObsBridge.detachStudioPreviewSurface();
+            } else {
+              ObsBridge.detachPreviewSurface();
+            }
             this.surfaceAttached = false;
             Logger.info(`preview surface '${this.xcomponentId}' detached`);
           }
@@ -66,11 +87,22 @@ export struct PreviewCanvas {
           .width('100%')
           .padding(6)
       }
+
+      // W4 canvas gesture overlay (tap-select / drag-move / pinch-scale).
+      // Only mounted when a model was handed in — shell-only builds and the
+      // program monitor keep the plain surface.
+      if (this.model !== null) {
+        PreviewInteractor({ model: this.model, viewWidth: this.areaW, viewHeight: this.areaH })
+      }
     }
     .width('100%')
     .height('100%')
     .backgroundColor('#101216')
     .borderRadius(6)
     .clip(true)
+    .onAreaChange((_oldValue: Area, newValue: Area) => {
+      this.areaW = Number(newValue.width);
+      this.areaH = Number(newValue.height);
+    })
   }
 }

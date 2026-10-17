@@ -18,6 +18,7 @@
 #include <node_api.h>
 
 #include "obs_bridge.h"
+#include "camera_sender.h"
 #include "xcomponent_surface.h"
 
 #undef LOG_DOMAIN
@@ -60,15 +61,49 @@ napi_value Init(napi_env env, napi_value exports)
         // Preview surface
         DECLARE_NAPI_FUNCTION("nativeAttachPreviewSurface", NativeAttachPreviewSurface),
         DECLARE_NAPI_FUNCTION("nativeDetachPreviewSurface", NativeDetachPreviewSurface),
+        // Studio mode (preview canvas + second display)
+        DECLARE_NAPI_FUNCTION("nativeSetPreviewScene", NativeSetPreviewScene),
+        DECLARE_NAPI_FUNCTION("nativeGetPreviewSceneId", NativeGetPreviewSceneId),
+        DECLARE_NAPI_FUNCTION("nativeAttachStudioPreviewSurface", NativeAttachStudioPreviewSurface),
+        DECLARE_NAPI_FUNCTION("nativeDetachStudioPreviewSurface", NativeDetachStudioPreviewSurface),
         // Scenes / sources
         DECLARE_NAPI_FUNCTION("nativeGetScenes", NativeGetScenes),
         DECLARE_NAPI_FUNCTION("nativeCreateScene", NativeCreateScene),
         DECLARE_NAPI_FUNCTION("nativeRemoveScene", NativeRemoveScene),
+        DECLARE_NAPI_FUNCTION("nativeRenameScene", NativeRenameScene),
         DECLARE_NAPI_FUNCTION("nativeGetSources", NativeGetSources),
         DECLARE_NAPI_FUNCTION("nativeAddSource", NativeAddSource),
         DECLARE_NAPI_FUNCTION("nativeRemoveSource", NativeRemoveSource),
         DECLARE_NAPI_FUNCTION("nativeSetSourceVisible", NativeSetSourceVisible),
+        DECLARE_NAPI_FUNCTION("nativeGetSourceBounds", NativeGetSourceBounds),
+        DECLARE_NAPI_FUNCTION("nativeSetSourcePosition", NativeSetSourcePosition),
+        DECLARE_NAPI_FUNCTION("nativeSetSourceRect", NativeSetSourceRect),
+        DECLARE_NAPI_FUNCTION("nativeScaleSourceBy", NativeScaleSourceBy),
+        DECLARE_NAPI_FUNCTION("nativeSetSourceTransform", NativeSetSourceTransform),
+        DECLARE_NAPI_FUNCTION("nativeGetSourceTransform", NativeGetSourceTransform),
+        DECLARE_NAPI_FUNCTION("nativeSetSourceBoundsFit", NativeSetSourceBoundsFit),
+        DECLARE_NAPI_FUNCTION("nativeSetSourceSize", NativeSetSourceSize),
+        DECLARE_NAPI_FUNCTION("nativeSetSourceLocked", NativeSetSourceLocked),
+        DECLARE_NAPI_FUNCTION("nativeSetSourceOrder", NativeSetSourceOrder),
+        DECLARE_NAPI_FUNCTION("nativeDuplicateSource", NativeDuplicateSource),
+        DECLARE_NAPI_FUNCTION("nativeRenameSource", NativeRenameSource),
+        // Wireless camera sender (phone role, W3-C1) — no libobs dependency
+        DECLARE_NAPI_FUNCTION("nativeStartCameraSender", NativeStartCameraSender),
+        DECLARE_NAPI_FUNCTION("nativeStopCameraSender", NativeStopCameraSender),
+        DECLARE_NAPI_FUNCTION("nativeCameraSenderStatus", NativeCameraSenderStatus),
+        DECLARE_NAPI_FUNCTION("nativeWebSourceFeed", NativeWebSourceFeed),
+        DECLARE_NAPI_FUNCTION("nativeGetSourceSettings", NativeGetSourceSettings),
+        DECLARE_NAPI_FUNCTION("nativeSetSourceSettings", NativeSetSourceSettings),
+        DECLARE_NAPI_FUNCTION("nativeMediaControl", NativeMediaControl),
+        DECLARE_NAPI_FUNCTION("nativeGetMediaState", NativeGetMediaState),
+        DECLARE_NAPI_FUNCTION("nativeMediaSeek", NativeMediaSeek),
+        DECLARE_NAPI_FUNCTION("nativeGetSourceAudioProps", NativeGetSourceAudioProps),
+        DECLARE_NAPI_FUNCTION("nativeSetSourceAudioProps", NativeSetSourceAudioProps),
+        DECLARE_NAPI_FUNCTION("nativeGetPropertySchema", NativeGetPropertySchema),
+        DECLARE_NAPI_FUNCTION("nativeSetFilterSettings", NativeSetFilterSettings),
         DECLARE_NAPI_FUNCTION("nativeSelectScene", NativeSelectScene),
+        DECLARE_NAPI_FUNCTION("nativeGetTransitionTypes", NativeGetTransitionTypes),
+        DECLARE_NAPI_FUNCTION("nativeSetTransitionType", NativeSetTransitionType),
         // Video settings
         DECLARE_NAPI_FUNCTION("nativeGetVideoInfo", NativeGetVideoInfo),
         DECLARE_NAPI_FUNCTION("nativeResetVideo", NativeResetVideo),
@@ -84,6 +119,7 @@ napi_value Init(napi_env env, napi_value exports)
         DECLARE_NAPI_FUNCTION("nativeSetVolume", NativeSetVolume),
         DECLARE_NAPI_FUNCTION("nativeGetOutputLevels", NativeGetOutputLevels),
         DECLARE_NAPI_FUNCTION("nativeCanCaptureSystemAudio", NativeCanCaptureSystemAudio),
+        DECLARE_NAPI_FUNCTION("nativeEnsureDesktopAudio", NativeEnsureDesktopAudio),
         // Outputs / stats
         DECLARE_NAPI_FUNCTION("nativeStartStreaming", NativeStartStreaming),
         DECLARE_NAPI_FUNCTION("nativeStopStreaming", NativeStopStreaming),
